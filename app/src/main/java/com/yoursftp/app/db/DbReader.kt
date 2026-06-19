@@ -54,6 +54,6 @@ fun createDbReader(path: String, format: DbFormat): DbReader {
         DbFormat.CSV -> CsvDbReader(path)
         DbFormat.SQL_DUMP -> SqlDumpReader(path)
         DbFormat.XML -> XmlDbReader(path)
-        DbFormat.BSON -> JsonDbReader(path) // BSON fallback: try reading as JSON
+        DbFormat.BSON -> BsonDbReader(path)
     }
 }
