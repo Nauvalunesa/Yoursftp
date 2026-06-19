@@ -21,8 +21,15 @@ class SftpFileClient(private val conn: Connection) : FileClient {
 
     override fun connect() {
         val jsch = JSch()
+        if (!conn.privateKey.isNullOrBlank()) {
+            val prvKeyBytes = conn.privateKey.toByteArray(Charsets.UTF_8)
+            val passBytes = if (!conn.passphrase.isNullOrEmpty()) conn.passphrase.toByteArray(Charsets.UTF_8) else null
+            jsch.addIdentity(conn.name, prvKeyBytes, null, passBytes)
+        }
         val s = jsch.getSession(conn.username, conn.host, conn.port)
-        s.setPassword(conn.password)
+        if (conn.privateKey.isNullOrBlank()) {
+            s.setPassword(conn.password)
+        }
         val config = Properties().apply {
             put("StrictHostKeyChecking", "no")
             // Jangan simpan/cek host key (server berubah setelah reinstall VPS).
@@ -35,7 +42,7 @@ class SftpFileClient(private val conn: Connection) : FileClient {
             // Aktifkan kembali ssh-rsa (SHA-1) untuk kompatibilitas server lama.
             put("PubkeyAcceptedAlgorithms",
                 "ssh-ed25519,ecdsa-sha2-nistp256,rsa-sha2-512,rsa-sha2-256,ssh-rsa")
-            put("PreferredAuthentications", "password,keyboard-interactive")
+            put("PreferredAuthentications", "publickey,password,keyboard-interactive")
             put("TcpNoDelay", "yes")
             put("compression.s2c", "zlib@openssh.com,zlib,none")
             put("compression.c2s", "zlib@openssh.com,zlib,none")

@@ -48,6 +48,8 @@ class EditConnectionViewModel(application: Application) : AndroidViewModel(appli
         password: String,
         initialPath: String,
         passiveMode: Boolean,
+        privateKey: String? = null,
+        passphrase: String? = null,
         onDone: () -> Unit
     ) = viewModelScope.launch {
         repo.save(
@@ -60,7 +62,9 @@ class EditConnectionViewModel(application: Application) : AndroidViewModel(appli
                 username = username.trim(),
                 password = password,
                 initialPath = initialPath.ifBlank { "/" },
-                passiveMode = passiveMode
+                passiveMode = passiveMode,
+                privateKey = privateKey?.takeIf { it.isNotBlank() },
+                passphrase = passphrase?.takeIf { it.isNotBlank() }
             )
         )
         onDone()

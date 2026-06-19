@@ -116,19 +116,108 @@ class SqlDumpReader(private val path: String) : DbReader {
     }
 
     private fun cleanSqlDialect(sql: String): String {
-        // Ganti backtick dengan double quote untuk kompatibilitas SQLite
         var cleaned = sql.replace('`', '"')
 
-        // Hapus MySQL-specific auto increment
+        // Hapus MySQL conditional comments (seperti /*!40101 SET ... */)
+        cleaned = cleaned.replace("/\\*!\\d*[^\\*]*\\*/".toRegex(), "")
+
+        // Hapus AUTO_INCREMENT
         cleaned = cleaned.replace("(?i)\\bAUTO_INCREMENT\\b".toRegex(), "")
 
-        // Hapus opsi ENGINE, CHARSET, COLLATE di akhir CREATE TABLE
+        // Hapus opsi tabel MySQL di akhir CREATE TABLE
         cleaned = cleaned.replace("(?i)\\bENGINE\\s*=\\s*\\w+".toRegex(), "")
         cleaned = cleaned.replace("(?i)\\bDEFAULT\\s+CHARSET\\s*=\\s*\\w+".toRegex(), "")
         cleaned = cleaned.replace("(?i)\\bCOLLATE\\s*=\\s*\\w+".toRegex(), "")
         cleaned = cleaned.replace("(?i)\\bCHARACTER\\s+SET\\s*=\\s*\\w+".toRegex(), "")
+        cleaned = cleaned.replace("(?i)\\bAUTO_INCREMENT\\s*=\\s*\\d+".toRegex(), "")
+        cleaned = cleaned.replace("(?i)\\bROW_FORMAT\\s*=\\s*\\w+".toRegex(), "")
+
+        // Bersihkan baris kolom pada pernyataan CREATE TABLE
+        if (cleaned.trimStart().startsWith("CREATE TABLE", ignoreCase = true)) {
+            cleaned = cleanCreateTableStatement(cleaned)
+        }
 
         return cleaned
+    }
+
+    private fun cleanCreateTableStatement(sql: String): String {
+        val firstParen = sql.indexOf('(')
+        val lastParen = sql.lastIndexOf(')')
+        if (firstParen == -1 || lastParen == -1 || firstParen >= lastParen) return sql
+
+        val prefix = sql.substring(0, firstParen + 1)
+        val body = sql.substring(firstParen + 1, lastParen)
+        val suffix = sql.substring(lastParen)
+
+        val parts = splitByTopLevelCommas(body)
+        val cleanParts = ArrayList<String>()
+
+        for (part in parts) {
+            val trimmed = part.trim()
+            val lower = trimmed.lowercase()
+
+            // Skip MySQL keys/indexes yang tidak didukung di dalam CREATE TABLE SQLite
+            if (lower.startsWith("key ") ||
+                lower.startsWith("unique key ") ||
+                lower.startsWith("index ") ||
+                lower.startsWith("fulltext ") ||
+                lower.startsWith("spatial ") ||
+                lower.startsWith("constraint ")
+            ) {
+                continue
+            }
+            cleanParts.add(part)
+        }
+
+        var joinedBody = cleanParts.joinToString(", ")
+        joinedBody = joinedBody.trim().removeSuffix(",")
+
+        return prefix + joinedBody + suffix
+    }
+
+    private fun splitByTopLevelCommas(text: String): List<String> {
+        val parts = ArrayList<String>()
+        val current = StringBuilder()
+        var parenDepth = 0
+        var inSingleQuote = false
+        var inDoubleQuote = false
+        var i = 0
+        val len = text.length
+        while (i < len) {
+            val c = text[i]
+            when (c) {
+                '\'' -> {
+                    if (!inDoubleQuote) inSingleQuote = !inSingleQuote
+                    current.append(c)
+                }
+                '"' -> {
+                    if (!inSingleQuote) inDoubleQuote = !inDoubleQuote
+                    current.append(c)
+                }
+                '(' -> {
+                    if (!inSingleQuote && !inDoubleQuote) parenDepth++
+                    current.append(c)
+                }
+                ')' -> {
+                    if (!inSingleQuote && !inDoubleQuote) parenDepth = (parenDepth - 1).coerceAtLeast(0)
+                    current.append(c)
+                }
+                ',' -> {
+                    if (!inSingleQuote && !inDoubleQuote && parenDepth == 0) {
+                        parts.add(current.toString())
+                        current.setLength(0)
+                    } else {
+                        current.append(c)
+                    }
+                }
+                else -> current.append(c)
+            }
+            i++
+        }
+        if (current.isNotEmpty()) {
+            parts.add(current.toString())
+        }
+        return parts
     }
 
     override fun close() {

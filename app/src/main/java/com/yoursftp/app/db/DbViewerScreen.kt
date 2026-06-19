@@ -19,6 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -157,7 +159,11 @@ fun DbViewerScreen(
             if (state.columns.isNotEmpty()) {
                 val hScroll = rememberScrollState()
                 Column(
-                    Modifier.weight(1f).horizontalScroll(hScroll)
+                    Modifier
+                        .weight(1f)
+                        .padding(8.dp)
+                        .horizontalScroll(hScroll)
+                        .border(0.5.dp, cellBorder)
                 ) {
                     // Header
                     Row(Modifier.background(headerBg)) {
@@ -165,8 +171,8 @@ fun DbViewerScreen(
                     }
                     // Baris data
                     Column(Modifier.verticalScroll(rememberScrollState())) {
-                        state.rows.forEach { row ->
-                            Row {
+                        state.rows.forEachIndexed { rIndex, row ->
+                            Row(Modifier.background(if (rIndex % 2 == 0) bg else Color(0xFF252526))) {
                                 row.forEach { cell -> GridCell(cell, header = false) }
                             }
                         }
@@ -191,17 +197,37 @@ fun DbViewerScreen(
 
 @Composable
 private fun GridCell(text: String, header: Boolean) {
-    Text(
-        text = text,
-        color = if (header) Color(0xFF9CDCFE) else fg,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 12.sp,
-        fontWeight = if (header) FontWeight.Bold else FontWeight.Normal,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
+    Box(
         modifier = Modifier
-            .width(150.dp)
-            .border(0.5.dp, cellBorder)
-            .padding(horizontal = 8.dp, vertical = 6.dp)
-    )
+            .width(160.dp)
+            .height(38.dp)
+            .drawBehind {
+                // Batas kanan sel
+                drawLine(
+                    color = cellBorder,
+                    start = Offset(size.width, 0f),
+                    end = Offset(size.width, size.height),
+                    strokeWidth = 1f
+                )
+                // Batas bawah sel
+                drawLine(
+                    color = cellBorder,
+                    start = Offset(0f, size.height),
+                    end = Offset(size.width, size.height),
+                    strokeWidth = 1f
+                )
+            }
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            text = text.ifEmpty { "-" },
+            color = if (header) Color(0xFF4FC1FF) else if (text.isEmpty()) Color(0xFF666666) else fg,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp,
+            fontWeight = if (header) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
 }

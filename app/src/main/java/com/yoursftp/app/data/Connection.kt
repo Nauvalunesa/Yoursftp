@@ -15,7 +15,9 @@ data class Connection(
     val password: String,
     val initialPath: String = "/",
     /** SFTP only: pasif/aktif tidak relevan; FTP saja. */
-    val passiveMode: Boolean = true
+    val passiveMode: Boolean = true,
+    val privateKey: String? = null,
+    val passphrase: String? = null
 ) {
     companion object {
         fun defaultPort(protocol: Protocol) = when (protocol) {

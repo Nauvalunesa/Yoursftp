@@ -15,7 +15,7 @@ class Converters {
     fun toProtocol(value: String): Protocol = Protocol.valueOf(value)
 }
 
-@Database(entities = [Connection::class], version = 1, exportSchema = false)
+@Database(entities = [Connection::class], version = 2, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun connectionDao(): ConnectionDao
@@ -29,7 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "yoursftp.db"
-                ).build().also { INSTANCE = it }
+                ).fallbackToDestructiveMigration().build().also { INSTANCE = it }
             }
     }
 }

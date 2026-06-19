@@ -39,6 +39,8 @@ fun EditConnectionScreen(
     var password by remember { mutableStateOf("") }
     var initialPath by remember { mutableStateOf("/") }
     var passive by remember { mutableStateOf(true) }
+    var privateKey by remember { mutableStateOf("") }
+    var passphrase by remember { mutableStateOf("") }
     var portEditedManually by remember { mutableStateOf(false) }
 
     LaunchedEffect(connectionId) {
@@ -47,6 +49,8 @@ fun EditConnectionScreen(
             name = c.name; protocol = c.protocol; host = c.host
             port = c.port.toString(); username = c.username; password = c.password
             initialPath = c.initialPath; passive = c.passiveMode
+            privateKey = c.privateKey ?: ""
+            passphrase = c.passphrase ?: ""
             portEditedManually = true
         }
     }
@@ -181,6 +185,24 @@ fun EditConnectionScreen(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    if (protocol == Protocol.SFTP) {
+                        OutlinedTextField(
+                            value = privateKey, onValueChange = { privateKey = it },
+                            label = { Text("Private Key (SSH PEM/OpenSSH, opsional)") },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            maxLines = 5,
+                            placeholder = { Text("-----BEGIN OPENSSH PRIVATE KEY-----\n...") }
+                        )
+                        OutlinedTextField(
+                            value = passphrase, onValueChange = { passphrase = it },
+                            label = { Text("Passphrase Private Key (opsional)") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
 
@@ -221,6 +243,11 @@ fun EditConnectionScreen(
             }
 
             // Save Button
+            val credentialsValid = if (protocol == Protocol.SFTP) {
+                password.isNotBlank() || privateKey.isNotBlank()
+            } else {
+                password.isNotBlank()
+            }
             Button(
                 onClick = {
                     vm.save(
@@ -229,10 +256,11 @@ fun EditConnectionScreen(
                         port = port.toIntOrNull() ?: Connection.defaultPort(protocol),
                         username = username, password = password,
                         initialPath = initialPath, passiveMode = passive,
+                        privateKey = privateKey, passphrase = passphrase,
                         onDone = onBack
                     )
                 },
-                enabled = host.isNotBlank() && username.isNotBlank() && password.isNotBlank(),
+                enabled = host.isNotBlank() && username.isNotBlank() && credentialsValid,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
