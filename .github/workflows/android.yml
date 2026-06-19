@@ -28,14 +28,19 @@ jobs:
     - name: Grant Execute Permission to Gradlew
       run: chmod +x gradlew
 
-    - name: Build Debug APK
-      run: ./gradlew assembleDebug
+    - name: Build Release APK
+      run: ./gradlew assembleRelease
 
-    - name: Upload Debug APK Artifact
+    - name: Rename and Prepare APK
+      run: |
+        mkdir -p build-artifacts
+        cp app/build/outputs/apk/release/app-release.apk build-artifacts/yoursFtp.apk
+
+    - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: YoursFTP-Debug-APK
-        path: app/build/outputs/apk/debug/app-debug.apk
+        name: yoursFtp-Release-APK
+        path: build-artifacts/yoursFtp.apk
 
     # Membuat atau memperbarui rilis GitHub secara otomatis
     - name: Create or Update GitHub Release
@@ -50,7 +55,7 @@ jobs:
           PRERELEASE_FLAG=""
         else
           TAG_NAME="nightly"
-          RELEASE_TITLE="Nightly Build"
+          RELEASE_TITLE="yoursFtp Nightly Build"
           PRERELEASE_FLAG="--prerelease"
           
           # Hapus rilis & tag 'nightly' lama jika ada agar tetap menjadi 1 versi rolling
@@ -62,4 +67,4 @@ jobs:
           --title "$RELEASE_TITLE" \
           $PRERELEASE_FLAG \
           --notes "Rilis otomatis dari GitHub Actions. Commit terakhir: ${{ github.sha }}." \
-          app/build/outputs/apk/debug/app-debug.apk
+          build-artifacts/yoursFtp.apk
