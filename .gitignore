@@ -1,0 +1,17 @@
+# Build
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Misc
+*.log
