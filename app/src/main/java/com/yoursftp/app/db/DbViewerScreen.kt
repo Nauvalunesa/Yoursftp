@@ -158,6 +158,19 @@ fun DbViewerScreen(
             // Grid hasil (scroll horizontal + vertikal)
             if (state.columns.isNotEmpty()) {
                 val hScroll = rememberScrollState()
+                val columnWidths = remember(state.columns, state.rows) {
+                    state.columns.associateWith { col ->
+                        val colIndex = state.columns.indexOf(col)
+                        val headerLength = col.length
+                        val maxRowLength = state.rows.maxOfOrNull { row ->
+                            if (colIndex in row.indices) row[colIndex].length else 0
+                        } ?: 0
+                        val maxChars = maxOf(headerLength, maxRowLength)
+                        // Pemetaan karakter ke dp: 8.dp per karakter + 24.dp padding.
+                        // Batasi lebar antara 60.dp dan 300.dp agar tetap proporsional.
+                        (maxChars * 8 + 24).coerceIn(60, 300).dp
+                    }
+                }
                 Column(
                     Modifier
                         .weight(1f)
@@ -167,13 +180,18 @@ fun DbViewerScreen(
                 ) {
                     // Header
                     Row(Modifier.background(headerBg)) {
-                        state.columns.forEach { col -> GridCell(col, header = true) }
+                        state.columns.forEach { col ->
+                            GridCell(col, header = true, width = columnWidths[col] ?: 160.dp)
+                        }
                     }
                     // Baris data
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         state.rows.forEachIndexed { rIndex, row ->
                             Row(Modifier.background(if (rIndex % 2 == 0) bg else Color(0xFF252526))) {
-                                row.forEach { cell -> GridCell(cell, header = false) }
+                                row.forEachIndexed { colIndex, cell ->
+                                    val colName = state.columns.getOrNull(colIndex)
+                                    GridCell(cell, header = false, width = columnWidths[colName] ?: 160.dp)
+                                }
                             }
                         }
                     }
@@ -196,10 +214,10 @@ fun DbViewerScreen(
 }
 
 @Composable
-private fun GridCell(text: String, header: Boolean) {
+private fun GridCell(text: String, header: Boolean, width: androidx.compose.ui.unit.Dp) {
     Box(
         modifier = Modifier
-            .width(160.dp)
+            .width(width)
             .height(38.dp)
             .drawBehind {
                 // Batas kanan sel
