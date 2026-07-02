@@ -2,6 +2,8 @@ package com.yoursftp.app.editor
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,6 +12,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
@@ -19,6 +22,8 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -39,13 +44,8 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.drawBehind
 
-private val editorTextStyle = TextStyle(
-    fontFamily = FontFamily.Monospace,
-    fontSize = 13.sp,
-    lineHeight = 20.sp,
-    color = Color(0xFFD4D4D4)            // VSCode editor.foreground
-)
 private val gutterColor = Color(0xFF858585)        // editorLineNumber.foreground
 private val gutterActiveColor = Color(0xFFC6C6C6)  // editorLineNumber.activeForeground
 private val bgColor = Color(0xFF1E1E1E)            // editor.background (VSCode Dark+)
@@ -68,6 +68,20 @@ fun LargeEditorScreen(
     val hScroll = rememberScrollState()
     var confirmBack by remember { mutableStateOf(false) }
     var pendingWord by remember { mutableStateOf<String?>(null) }
+
+    var fontSizeSp by remember { mutableStateOf(13f) }
+    val transformableState = rememberTransformableState { zoomChange, _, _ ->
+        fontSizeSp = (fontSizeSp * zoomChange).coerceIn(8f, 30f)
+    }
+
+    val currentEditorTextStyle = remember(fontSizeSp) {
+        TextStyle(
+            fontFamily = FontFamily.Monospace,
+            fontSize = fontSizeSp.sp,
+            lineHeight = (fontSizeSp * 1.5f).sp,
+            color = Color(0xFFD4D4D4)
+        )
+    }
 
     LaunchedEffect(path) { vm.load(path) }
 
@@ -115,6 +129,13 @@ fun LargeEditorScreen(
                     }
                 },
                 actions = {
+                    // Zoom Buttons
+                    IconButton(onClick = { fontSizeSp = (fontSizeSp - 1f).coerceAtLeast(8f) }) {
+                        Icon(Icons.Default.ZoomOut, contentDescription = "Perkecil", modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = { fontSizeSp = (fontSizeSp + 1f).coerceAtMost(30f) }) {
+                        Icon(Icons.Default.ZoomIn, contentDescription = "Perbesar", modifier = Modifier.size(18.dp))
+                    }
                     IconButton(onClick = { vm.undo() }, enabled = state.canUndo) {
                         Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Urungkan")
                     }
@@ -152,7 +173,12 @@ fun LargeEditorScreen(
                     onClose = vm::toggleSearch
                 )
             }
-            BoxWithConstraints(Modifier.fillMaxSize().weight(1f)) {
+            BoxWithConstraints(
+                Modifier
+                    .fillMaxSize()
+                    .weight(1f)
+                    .transformable(transformableState)
+            ) {
                 if (state.loading) {
                     Column(
                         Modifier.align(Alignment.Center),
@@ -170,8 +196,6 @@ fun LargeEditorScreen(
                     }
                 } else {
                     val gutterWidth = ((state.lineCount.coerceAtLeast(1).toString().length) * 10 + 20).dp
-                    // Scroll horizontal di level kontainer (bukan per-baris) agar tidak
-                    // bentrok dengan gulir vertikal LazyColumn — geser samping jadi lancar.
                     val rowMinWidth = maxWidth
                     LazyColumn(
                         state = listState,
@@ -179,14 +203,15 @@ fun LargeEditorScreen(
                             .fillMaxSize()
                             .horizontalScroll(hScroll)
                     ) {
-                        items(count = state.lineCount, key = { vm.lineKey(it) }) { index ->
-                            // Baca activeLine & revision agar baris ikut recompose setelah edit.
-                            val active = index == state.activeLine
-                            @Suppress("UNUSED_EXPRESSION") state.revision
+                        items(count = state.lineCount, key = { it }) { index ->
+                            val active = state.activeLine == index
+                            val rowBg = if (active) activeLineBg else bgColor
                             Row(
-                                Modifier
+                                modifier = Modifier
+                                    .fillMaxWidth()
                                     .widthIn(min = rowMinWidth)
-                                    .background(if (active) activeLineBg else bgColor)
+                                    .background(rowBg)
+                                    .drawBehindLines()
                             ) {
                                 // Gutter nomor baris (lebar tetap).
                                 Box(
@@ -196,7 +221,7 @@ fun LargeEditorScreen(
                                 ) {
                                     Text(
                                         text = "${index + 1}",
-                                        style = editorTextStyle.copy(
+                                        style = currentEditorTextStyle.copy(
                                             color = if (active) gutterActiveColor else gutterColor
                                         ),
                                         maxLines = 1,
@@ -215,6 +240,7 @@ fun LargeEditorScreen(
                                             ext = vm.ext,
                                             canMergeUp = index > 0,
                                             applyWord = pendingWord,
+                                            textStyle = currentEditorTextStyle,
                                             onChange = { vm.commitLine(index, it) },
                                             onMultiline = { full, caret -> vm.applyMultiline(index, full, caret) },
                                             onMergeUp = { vm.mergeWithPrevious(index) },
@@ -229,7 +255,7 @@ fun LargeEditorScreen(
                                         }
                                         Text(
                                             text = if (annotated.isEmpty()) AnnotatedString(" ") else annotated,
-                                            style = editorTextStyle,
+                                            style = currentEditorTextStyle,
                                             softWrap = false,
                                             maxLines = 1,
                                             modifier = Modifier
@@ -246,7 +272,7 @@ fun LargeEditorScreen(
                     CircularProgressIndicator(Modifier.align(Alignment.TopEnd).padding(16.dp))
                 }
             }
-            // Bar prediksi kode (muncul saat ada saran untuk prefix yang diketik).
+            // Bar prediksi kode (saran kata).
             if (state.suggestions.isNotEmpty()) {
                 SuggestionBar(state.suggestions) { word -> pendingWord = word }
             }
@@ -263,7 +289,7 @@ fun LargeEditorScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Baris: ${state.lineCount} | Mesin: Editor Besar (Large)",
+                        text = "Baris: ${state.lineCount} | Skala: ${(fontSizeSp * 100 / 13).toInt()}% | Mesin: Editor Besar (Large)",
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace
                     )
@@ -300,6 +326,7 @@ private fun ActiveLine(
     ext: String,
     canMergeUp: Boolean,
     applyWord: String?,
+    textStyle: TextStyle,
     onChange: (String) -> Unit,
     onMultiline: (String, Int) -> Unit,
     onMergeUp: () -> Unit,
@@ -315,7 +342,6 @@ private fun ActiveLine(
     }
     val transformation = remember(ext) { LineHighlightTransformation(ext, false) }
 
-    // Saat user memilih saran dari bar, pasang kata penuh ke field.
     LaunchedEffect(applyWord) {
         if (applyWord != null) {
             val (newText, newCaret) = computeApply(tfv.text, tfv.selection.start, applyWord)
@@ -335,7 +361,7 @@ private fun ActiveLine(
                 onCaretChange(new.text, new.selection.start)
             }
         },
-        textStyle = editorTextStyle,
+        textStyle = textStyle,
         cursorBrush = SolidColor(Color(0xFFAEAFAD)),
         visualTransformation = transformation,
         singleLine = false,
@@ -359,24 +385,23 @@ private fun SuggestionBar(words: List<String>, onPick: (String) -> Unit) {
     androidx.compose.foundation.lazy.LazyRow(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF252526))   // VSCode dropdown bg
-            .padding(horizontal = 6.dp, vertical = 5.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+            .background(Color(0xFF252526))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        items(words) { w ->
-            Surface(
-                color = Color(0xFF0E639C),       // VSCode button blue
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
-                modifier = Modifier.clickable { onPick(w) }
+        items(words) { word ->
+            Button(
+                onClick = { onPick(word) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF007ACC),
+                    contentColor = Color.White
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(4.dp),
+                modifier = Modifier.height(28.dp)
             ) {
-                Text(
-                    text = w,
-                    color = Color(0xFFFFFFFF),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                )
+                Text(word, fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -436,4 +461,13 @@ private fun SearchBar(
             }
         }
     }
+}
+
+private fun Modifier.drawBehindLines(): Modifier = this.drawBehind {
+    drawLine(
+        color = dividerColor,
+        start = androidx.compose.ui.geometry.Offset(0f, this.size.height),
+        end = androidx.compose.ui.geometry.Offset(this.size.width, this.size.height),
+        strokeWidth = 1f
+    )
 }

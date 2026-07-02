@@ -5,8 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,6 +25,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.*
 import android.content.ClipboardManager
 import android.content.Context
@@ -56,6 +57,12 @@ import androidx.compose.ui.unit.sp
 import com.yoursftp.app.terminal.*
 import com.yoursftp.app.ui.TermKey
 import com.yoursftp.app.ui.TerminalViewModel
+import com.yoursftp.app.ui.AiAssistant
+import com.yoursftp.app.ui.AiMode
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private data class AccessoryKey(val label: String, val send: (TerminalViewModel) -> Unit)
 
@@ -75,8 +82,12 @@ private val accessoryKeys = listOf(
     AccessoryKey("END") { it.sendKey(TermKey.END) }
 )
 
-private val defaultFg = Color(0xFFE2E8F0)
-private val termBg = Color(0xFF0F172A)
+// Catppuccin Mocha Palette
+private val defaultFg = Color(0xFFCDD6F4)
+private val termBg = Color(0xFF1E1E2E)
+private val panelBg = Color(0xFF181825)
+private val buttonBg = Color(0xFF313244)
+private val accentColor = Color(0xFFF5C2E7)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,17 +101,20 @@ fun TerminalScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val listState = rememberLazyListState()
-    val hScroll = rememberScrollState()
 
-    var fontSizeSp by remember { mutableStateOf(13f) }
+    var fontSizeSp by remember { mutableStateOf(12f) }
     val transformableState = rememberTransformableState { zoomChange, _, _ ->
-        fontSizeSp = (fontSizeSp * zoomChange).coerceIn(3f, 32f)
+        fontSizeSp = (fontSizeSp * zoomChange).coerceIn(8f, 24f)
     }
 
-    // Baseline untuk diff input (real-time typing).
     var input by remember { mutableStateOf(TextFieldValue("")) }
 
+    // Dialog state
     var showShortcutDialog by remember { mutableStateOf(false) }
+    var showAiCopilotDialog by remember { mutableStateOf(false) }
+    var aiPrompt by remember { mutableStateOf("") }
+    var generatedCommand by remember { mutableStateOf<Pair<String, String>?>(null) }
+
     val defaultShortcuts = remember {
         listOf(
             "ls -la", "cd ..", "pwd", "df -h", "free -m", "top", "uname -a", "history", "ping -c 4 1.1.1.1"
@@ -109,11 +123,26 @@ fun TerminalScreen(
     var customShortcuts by remember { mutableStateOf(listOf<String>()) }
     var newShortcutText by remember { mutableStateOf("") }
 
-    val pulse = rememberInfiniteTransition(label = "pulse")
-    val dotAlpha by pulse.animateFloat(
+    // AI Assistant Integration
+    val aiAssistant = remember { AiAssistant(context) }
+    var aiMode by remember { mutableStateOf(aiAssistant.aiMode) }
+    var geminiApiKey by remember { mutableStateOf(aiAssistant.geminiApiKey) }
+    var loadingAi by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // Efek kursor berkedip (blinking cursor)
+    val infiniteTransition = rememberInfiniteTransition(label = "cursor")
+    val cursorAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.15f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(500, easing = LinearEasing), RepeatMode.Reverse),
+        label = "cursorAlpha"
+    )
+
+    // Indikator koneksi berkedip
+    val dotAlpha by infiniteTransition.animateFloat(
         initialValue = 0.25f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Reverse),
-        label = "alpha"
+        label = "dotAlpha"
     )
 
     LaunchedEffect(connectionId) { vm.connect(connectionId) }
@@ -121,7 +150,7 @@ fun TerminalScreen(
     val snapshot = state.snapshot
     val lineCount = snapshot?.lines?.size ?: 0
 
-    // Apakah daftar sedang berada di paling bawah (untuk auto-scroll cerdas).
+    // Auto-scroll ke bawah secara cerdas jika posisi scroll di bawah
     val atBottom by remember {
         derivedStateOf {
             val info = listState.layoutInfo
@@ -130,15 +159,20 @@ fun TerminalScreen(
         }
     }
 
-    // Auto-scroll ke bawah HANYA jika user memang sedang di bawah; kalau menggulung
-    // ke atas (lihat riwayat), jangan ditarik turun.
     LaunchedEffect(snapshot?.revision) {
         if (lineCount > 0 && atBottom) listState.scrollToItem(lineCount - 1)
     }
 
     Scaffold(
+        containerColor = termBg,
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = panelBg,
+                    titleContentColor = defaultFg,
+                    navigationIconContentColor = defaultFg,
+                    actionIconContentColor = defaultFg
+                ),
                 title = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -153,7 +187,7 @@ fun TerminalScreen(
                         Text(
                             "SSH: ${state.connectionName}",
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            fontWeight = FontWeight.Bold, fontSize = 16.sp
+                            fontWeight = FontWeight.Bold, fontSize = 14.sp
                         )
                     }
                 },
@@ -163,12 +197,28 @@ fun TerminalScreen(
                     }
                 },
                 actions = {
+                    // Tombol AI Copilot
+                    IconButton(onClick = { showAiCopilotDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = "Asisten AI",
+                            tint = Color(0xFFF5C2E7)
+                        )
+                    }
+                    // Zoom Out & In Font
+                    IconButton(onClick = { fontSizeSp = (fontSizeSp - 1f).coerceAtLeast(8f) }) {
+                        Icon(Icons.Default.ZoomOut, contentDescription = "Perkecil Font", modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = { fontSizeSp = (fontSizeSp + 1f).coerceAtMost(24f) }) {
+                        Icon(Icons.Default.ZoomIn, contentDescription = "Perbesar Font", modifier = Modifier.size(18.dp))
+                    }
+                    // Salin layar & Bersihkan
                     IconButton(onClick = {
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         cm.setText(AnnotatedString(vm.screenText()))
-                    }) { Icon(Icons.Default.ContentCopy, contentDescription = "Salin layar") }
+                    }) { Icon(Icons.Default.ContentCopy, contentDescription = "Salin layar", modifier = Modifier.size(18.dp)) }
                     IconButton(onClick = { vm.clearConsole() }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Bersihkan")
+                        Icon(Icons.Default.Delete, contentDescription = "Bersihkan", modifier = Modifier.size(18.dp))
                     }
                 }
             )
@@ -177,11 +227,11 @@ fun TerminalScreen(
         Column(
             Modifier.fillMaxSize().padding(padding).background(termBg)
         ) {
+            // Kontainer Terminal Emulator
             BoxWithConstraints(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    // Cubit 2 jari untuk zoom in/out (jalan bareng scroll & geser).
                     .transformable(transformableState)
                     .clickable(
                         indication = null,
@@ -190,6 +240,7 @@ fun TerminalScreen(
                         focusRequester.requestFocus()
                         keyboard?.show()
                     }
+                    .padding(4.dp)
             ) {
                 val charWidthDp = fontSizeSp * 0.6f
                 val lineHeightDp = fontSizeSp * 1.3f
@@ -219,25 +270,24 @@ fun TerminalScreen(
                         state = listState,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = 8.dp)
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {
                         items(count = snapshot.lines.size, key = { it }) { rowIdx ->
                             val line = snapshot.lines[rowIdx]
                             val cursorHere = showCursor && rowIdx == cursorRow
-                            val annotated = remember(line, cursorHere, cursorCol, snapshot.revision) {
-                                renderLine(line, if (cursorHere) cursorCol else -1)
+                            val annotated = remember(line, cursorHere, cursorCol, snapshot.revision, cursorAlpha) {
+                                renderLine(line, if (cursorHere) cursorCol else -1, cursorAlpha)
                             }
                             Text(text = annotated, style = textStyle, softWrap = false, maxLines = 1)
                         }
                     }
                 }
 
-                // Field penangkap ketikan (transparan, di pojok) untuk input real-time.
+                // Keyboard input catcher (transparan)
                 BasicTextField(
                     value = input,
                     onValueChange = { newVal ->
                         handleInput(input.text, newVal.text, vm)
-                        // Reset baseline tiap baris dikirim atau bila terlalu panjang.
                         input = if (newVal.text.contains('\n') || newVal.text.length > 800)
                             TextFieldValue("") else newVal
                     },
@@ -250,12 +300,13 @@ fun TerminalScreen(
                 )
             }
 
-            // Baris tombol panah + aksesori
-            ArrowRow(vm) { showShortcutDialog = true }
+            // Keyboard Dock
+            ArrowRow(vm, { showShortcutDialog = true })
             AccessoryRow(vm)
         }
     }
 
+    // Dialog Pintasan Perintah Biasa
     if (showShortcutDialog) {
         AlertDialog(
             onDismissRequest = { showShortcutDialog = false },
@@ -340,33 +391,203 @@ fun TerminalScreen(
             }
         )
     }
+
+    // Dialog AI Copilot Generator (Dual Mode: Offline vs Online Gemini)
+    if (showAiCopilotDialog) {
+        AlertDialog(
+            onDismissRequest = { 
+                showAiCopilotDialog = false
+                aiPrompt = ""
+                generatedCommand = null
+                loadingAi = false
+            },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = accentColor)
+                    Text("AI Copilot Assistant", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    
+                    // AI Configuration Settings in Dialog
+                    Card(
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = panelBg),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Pengaturan AI", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = accentColor)
+                            
+                            // Mode selector
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val modes = listOf(AiMode.OFFLINE to "Offline", AiMode.ONLINE to "Gemini API")
+                                modes.forEach { (mode, label) ->
+                                    val isSelected = aiMode == mode
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSelected) MaterialTheme.colorScheme.primary else buttonBg)
+                                            .clickable {
+                                                aiMode = mode
+                                                aiAssistant.aiMode = mode
+                                            }
+                                            .padding(vertical = 6.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(label, color = if (isSelected) Color.White else defaultFg, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+
+                            // API Key Field (if Online selected)
+                            if (aiMode == AiMode.ONLINE) {
+                                OutlinedTextField(
+                                    value = geminiApiKey,
+                                    onValueChange = {
+                                        geminiApiKey = it
+                                        aiAssistant.geminiApiKey = it
+                                    },
+                                    placeholder = { Text("Masukkan Gemini API Key...", fontSize = 11.sp) },
+                                    label = { Text("Gemini API Key", fontSize = 10.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textStyle = TextStyle(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                )
+                            }
+                        }
+                    }
+
+                    Text("Ketik tugas server Anda (Indo/Inggris). AI akan merumuskan perintah linux untuk Anda.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    
+                    OutlinedTextField(
+                        value = aiPrompt,
+                        onValueChange = { aiPrompt = it },
+                        placeholder = { Text("Contoh: 'cek penggunaan RAM' atau 'cari file logs.txt'", fontSize = 11.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = TextStyle(fontSize = 12.sp)
+                    )
+
+                    Button(
+                        onClick = {
+                            if (aiPrompt.isNotBlank()) {
+                                loadingAi = true
+                                scope.launch {
+                                    generatedCommand = aiAssistant.generateCommand(aiPrompt)
+                                    loadingAi = false
+                                }
+                            }
+                        },
+                        enabled = !loadingAi && aiPrompt.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        if (loadingAi) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Text("✨ Tanya AI", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+
+                    generatedCommand?.let { (cmd, desc) ->
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = buttonBg)
+                        Text("Hasil Rekomendasi AI:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        
+                        Card(
+                            shape = RoundedCornerShape(8.dp),
+                            colors = CardDefaults.cardColors(containerColor = panelBg),
+                            modifier = Modifier.fillMaxWidth().border(0.5.dp, accentColor.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        ) {
+                            Text(
+                                text = cmd,
+                                color = accentColor,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                        Text(
+                            text = desc,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontStyle = FontStyle.Italic
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    generatedCommand?.let { (cmd, _) ->
+                        if (cmd != "Error") {
+                            OutlinedButton(
+                                onClick = {
+                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    cm.setText(AnnotatedString(cmd))
+                                    ToastUtil.show(context, "Perintah disalin ke clipboard")
+                                }
+                            ) {
+                                Text("Salin", fontSize = 12.sp)
+                            }
+
+                            Button(
+                                onClick = {
+                                    vm.sendText(cmd + "\r")
+                                    showAiCopilotDialog = false
+                                    aiPrompt = ""
+                                    generatedCommand = null
+                                }
+                            ) {
+                                Text("Jalankan", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { 
+                        showAiCopilotDialog = false
+                        aiPrompt = ""
+                        generatedCommand = null
+                        loadingAi = false
+                    }
+                ) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
 }
 
 @Composable
 private fun ArrowRow(vm: TerminalViewModel, onShowShortcuts: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().background(Color(0xFF1E293B)).padding(horizontal = 8.dp, vertical = 4.dp),
+        Modifier.fillMaxWidth().background(panelBg).padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val ctx = LocalContext.current
         IconButton(onClick = { vm.sendKey(TermKey.UP) }) {
-            Icon(Icons.Default.KeyboardArrowUp, "Atas", tint = Color(0xFFCBD5E1))
+            Icon(Icons.Default.KeyboardArrowUp, "Atas", tint = defaultFg)
         }
         IconButton(onClick = { vm.sendKey(TermKey.DOWN) }) {
-            Icon(Icons.Default.KeyboardArrowDown, "Bawah", tint = Color(0xFFCBD5E1))
+            Icon(Icons.Default.KeyboardArrowDown, "Bawah", tint = defaultFg)
         }
         IconButton(onClick = { vm.sendKey(TermKey.LEFT) }) {
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Kiri", tint = Color(0xFFCBD5E1))
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Kiri", tint = defaultFg)
         }
         IconButton(onClick = { vm.sendKey(TermKey.RIGHT) }) {
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Kanan", tint = Color(0xFFCBD5E1))
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Kanan", tint = defaultFg)
         }
         Spacer(Modifier.weight(1f))
         
-        // Pintasan Perintah (Quick Commands) Button
+        // Pintasan Perintah (List) Button
         IconButton(onClick = onShowShortcuts) {
-            Icon(Icons.Default.List, "Pintasan Perintah", tint = Color(0xFF38BDF8))
+            Icon(Icons.Default.List, "Pintasan Perintah", tint = accentColor)
         }
 
         IconButton(onClick = {
@@ -375,14 +596,14 @@ private fun ArrowRow(vm: TerminalViewModel, onShowShortcuts: () -> Unit) {
             if (clip != null && clip.itemCount > 0) {
                 vm.paste(clip.getItemAt(0).text?.toString() ?: "")
             }
-        }) { Icon(Icons.Default.ContentPaste, "Tempel", tint = Color(0xFF38BDF8)) }
+        }) { Icon(Icons.Default.ContentPaste, "Tempel", tint = accentColor) }
     }
 }
 
 @Composable
 private fun AccessoryRow(vm: TerminalViewModel) {
     androidx.compose.foundation.lazy.LazyRow(
-        Modifier.fillMaxWidth().background(Color(0xFF1E293B)).padding(horizontal = 8.dp, vertical = 6.dp),
+        Modifier.fillMaxWidth().background(panelBg).padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -390,7 +611,7 @@ private fun AccessoryRow(vm: TerminalViewModel) {
             Button(
                 onClick = { key.send(vm) },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF334155), contentColor = Color(0xFFF1F5F9)
+                    containerColor = buttonBg, contentColor = defaultFg
                 ),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 shape = RoundedCornerShape(6.dp),
@@ -402,10 +623,8 @@ private fun AccessoryRow(vm: TerminalViewModel) {
     }
 }
 
-/** Kirim selisih ketikan ke server (append atau hapus). */
 private fun handleInput(old: String, new: String, vm: TerminalViewModel) {
     if (new.contains('\n')) {
-        // Kirim teks sebelum newline lalu Enter (carriage return).
         val idx = new.indexOf('\n')
         val tail = new.substring(commonPrefixLen(old, new), idx.coerceAtLeast(commonPrefixLen(old, new)))
         if (tail.isNotEmpty()) vm.sendText(tail)
@@ -414,7 +633,7 @@ private fun handleInput(old: String, new: String, vm: TerminalViewModel) {
     }
     val common = commonPrefixLen(old, new)
     val removed = old.length - common
-    if (removed > 0) repeat(removed) { vm.sendText("\u007F") } // DEL (backspace)
+    if (removed > 0) repeat(removed) { vm.sendText("\u007F") }
     if (new.length > common) vm.sendText(new.substring(common))
 }
 
@@ -425,7 +644,6 @@ private fun commonPrefixLen(a: String, b: String): Int {
     return i
 }
 
-/** Tangani tombol fisik (keyboard luar) — panah, enter, backspace, tab, ctrl. */
 private fun handleHardwareKey(e: KeyEvent, vm: TerminalViewModel): Boolean {
     if (e.type != KeyEventType.KeyDown) return false
     return when (e.key) {
@@ -441,14 +659,11 @@ private fun handleHardwareKey(e: KeyEvent, vm: TerminalViewModel): Boolean {
     }
 }
 
-// ---------------- Render warna & atribut ----------------
-
-private fun renderLine(line: TermLine, cursorCol: Int): AnnotatedString {
+private fun renderLine(line: TermLine, cursorCol: Int, cursorAlpha: Float): AnnotatedString {
     return buildAnnotatedString {
         val cells = line.cells
         var i = 0
         val n = cells.size
-        // Pangkas spasi kosong di akhir (tanpa atribut) agar ringan, kecuali ada kursor.
         var end = n
         while (end > 0 && isBlank(cells[end - 1]) && (cursorCol < 0 || end - 1 != cursorCol)) end--
         if (cursorCol in 0 until n && end <= cursorCol) end = cursorCol + 1
@@ -456,7 +671,7 @@ private fun renderLine(line: TermLine, cursorCol: Int): AnnotatedString {
         while (i < end) {
             val cell = cells[i]
             val isCursor = i == cursorCol
-            val (fg, bg) = resolveColors(cell, isCursor)
+            val (fg, bg) = resolveColors(cell, isCursor, cursorAlpha)
             val style = SpanStyle(
                 color = fg,
                 background = if (bg == termBg) Color.Unspecified else bg,
@@ -469,7 +684,7 @@ private fun renderLine(line: TermLine, cursorCol: Int): AnnotatedString {
             pop()
             i++
         }
-        if (end == 0 && cursorCol < 0) append(' ') // baris kosong tetap punya tinggi
+        if (end == 0 && cursorCol < 0) append(' ')
     }
 }
 
@@ -487,12 +702,16 @@ private fun decorationFor(attr: Int): TextDecoration? {
     }
 }
 
-private fun resolveColors(cell: Cell, isCursor: Boolean): Pair<Color, Color> {
+private fun resolveColors(cell: Cell, isCursor: Boolean, cursorAlpha: Float): Pair<Color, Color> {
     var fg = colorOf(cell.fg, true)
     var bg = colorOf(cell.bg, false)
     if (cell.attr and ATTR_DIM != 0) fg = fg.copy(alpha = 0.6f)
     if (cell.attr and ATTR_REVERSE != 0) { val t = fg; fg = if (bg == termBg) defaultFg else bg; bg = t }
-    if (isCursor) { val t = fg; fg = termBg; bg = t.takeIf { it != termBg } ?: defaultFg }
+    if (isCursor) { 
+        val t = fg
+        fg = termBg
+        bg = (t.takeIf { it != termBg } ?: defaultFg).copy(alpha = cursorAlpha)
+    }
     return fg to bg
 }
 
@@ -521,20 +740,26 @@ private fun palette256(index: Int): Color = when (index) {
 }
 
 private val ansi16 = arrayOf(
-    Color(0xFF1E293B), // 0 black (sedikit terang agar terlihat di tema gelap)
-    Color(0xFFEF4444), // 1 red
-    Color(0xFF22C55E), // 2 green
-    Color(0xFFEAB308), // 3 yellow
-    Color(0xFF3B82F6), // 4 blue
-    Color(0xFFD946EF), // 5 magenta
-    Color(0xFF06B6D4), // 6 cyan
-    Color(0xFFE2E8F0), // 7 white
-    Color(0xFF64748B), // 8 bright black
-    Color(0xFFF87171), // 9 bright red
-    Color(0xFF4ADE80), // 10 bright green
-    Color(0xFFFACC15), // 11 bright yellow
-    Color(0xFF60A5FA), // 12 bright blue
-    Color(0xFFF472B6), // 13 bright magenta
-    Color(0xFF22D3EE), // 14 bright cyan
-    Color(0xFFFFFFFF)  // 15 bright white
+    Color(0xFF1E293B),
+    Color(0xFFEF4444),
+    Color(0xFF22C55E),
+    Color(0xFFEAB308),
+    Color(0xFF3B82F6),
+    Color(0xFFD946EF),
+    Color(0xFF06B6D4),
+    Color(0xFFE2E8F0),
+    Color(0xFF64748B),
+    Color(0xFFF87171),
+    Color(0xFF4ADE80),
+    Color(0xFFFACC15),
+    Color(0xFF60A5FA),
+    Color(0xFFF472B6),
+    Color(0xFF22D3EE),
+    Color(0xFFFFFFFF)
 )
+
+private object ToastUtil {
+    fun show(context: Context, msg: String) {
+        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+    }
+}

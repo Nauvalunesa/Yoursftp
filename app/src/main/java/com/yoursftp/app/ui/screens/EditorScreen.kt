@@ -1,6 +1,8 @@
 package com.yoursftp.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -9,6 +11,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,6 +45,11 @@ fun EditorScreen(
     val verticalScrollState = rememberScrollState()
     val horizontalScrollState = rememberScrollState()
 
+    var fontSizeSp by remember { mutableStateOf(13f) }
+    val transformableState = rememberTransformableState { zoomChange, _, _ ->
+        fontSizeSp = (fontSizeSp * zoomChange).coerceIn(8f, 30f)
+    }
+
     LaunchedEffect(path) { vm.load(path) }
 
     LaunchedEffect(state.savedMessage, state.error) {
@@ -54,10 +63,19 @@ fun EditorScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF252526), // VSCode panel color
+                    titleContentColor = Color(0xFFD4D4D4),
+                    navigationIconContentColor = Color(0xFFD4D4D4),
+                    actionIconContentColor = Color(0xFFD4D4D4)
+                ),
                 title = {
                     Text(
                         path.substringAfterLast('/'),
-                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 },
                 navigationIcon = {
@@ -66,6 +84,13 @@ fun EditorScreen(
                     }
                 },
                 actions = {
+                    // Zoom Buttons
+                    IconButton(onClick = { fontSizeSp = (fontSizeSp - 1f).coerceAtLeast(8f) }) {
+                        Icon(Icons.Default.ZoomOut, contentDescription = "Perkecil", modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = { fontSizeSp = (fontSizeSp + 1f).coerceAtMost(30f) }) {
+                        Icon(Icons.Default.ZoomIn, contentDescription = "Perbesar", modifier = Modifier.size(18.dp))
+                    }
                     IconButton(onClick = { vm.save() }, enabled = !state.saving && !state.loading) {
                         Icon(Icons.Default.Save, contentDescription = "Simpan")
                     }
@@ -78,12 +103,11 @@ fun EditorScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .background(Color(0xFF1E1E1E)) // One Dark Editor Background
+                .transformable(transformableState)
         ) {
             if (state.loading) {
                 CircularProgressIndicator(Modifier.align(Alignment.Center))
             } else {
-                // Hitung highlight di background thread, sekali per perubahan isi —
-                // bukan tiap frame. Sampai selesai, tampilkan teks polos dulu.
                 val highlighted by produceState(
                     initialValue = AnnotatedString(state.content),
                     state.content, path
@@ -95,6 +119,7 @@ fun EditorScreen(
                 val transformation = remember(highlighted) {
                     PrecomputedHighlightTransformation(highlighted)
                 }
+
                 Column(Modifier.fillMaxSize()) {
                     Row(
                         modifier = Modifier
@@ -107,7 +132,7 @@ fun EditorScreen(
                         
                         Column(
                             modifier = Modifier
-                                .background(Color(0xFF1E1E1E)) // Darker gutter
+                                .background(Color(0xFF1E1E1E))
                                 .padding(vertical = 12.dp)
                                 .widthIn(min = 40.dp)
                         ) {
@@ -115,8 +140,8 @@ fun EditorScreen(
                                 text = lineNumbersText,
                                 style = TextStyle(
                                     fontFamily = FontFamily.Monospace,
-                                    fontSize = 13.sp,
-                                    lineHeight = 20.sp,
+                                    fontSize = fontSizeSp.sp,
+                                    lineHeight = (fontSizeSp * 1.5f).sp,
                                     color = Color(0xFF858585)
                                 ),
                                 modifier = Modifier.padding(horizontal = 8.dp)
@@ -143,11 +168,11 @@ fun EditorScreen(
                                 onValueChange = vm::onContentChange,
                                 textStyle = TextStyle(
                                     fontFamily = FontFamily.Monospace,
-                                    fontSize = 13.sp,
-                                    lineHeight = 20.sp,
-                                    color = Color(0xFFD4D4D4) // One Dark Text Color
+                                    fontSize = fontSizeSp.sp,
+                                    lineHeight = (fontSizeSp * 1.5f).sp,
+                                    color = Color(0xFFD4D4D4)
                                 ),
-                                cursorBrush = SolidColor(Color(0xFFAEAFAD)), // Active cursor color
+                                cursorBrush = SolidColor(Color(0xFFAEAFAD)),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 12.dp),
@@ -172,7 +197,7 @@ fun EditorScreen(
                             val fileExt = path.substringAfterLast('.', "").uppercase()
                             
                             Text(
-                                text = "Baris: $lineCount | Karakter: $charCount",
+                                text = "Baris: $lineCount | Karakter: $charCount | Skala: ${(fontSizeSp * 100 / 13).toInt()}%",
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace
                             )

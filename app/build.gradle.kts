@@ -13,9 +13,18 @@ android {
         applicationId = "com.yoursftp.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.0.6"
+        versionCode = 6
+        versionName = "1.0.7"
         vectorDrawables { useSupportLibrary = true }
+    }
+
+    signingConfigs {
+        create("sharedDebug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
@@ -26,7 +35,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("sharedDebug")
+        }
+        debug {
+            signingConfig = signingConfigs.getByName("sharedDebug")
         }
     }
 
