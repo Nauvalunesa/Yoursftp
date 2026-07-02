@@ -12,6 +12,8 @@ import com.yoursftp.app.data.Protocol
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private fun app(application: Application) = (application as YoursFtpApp)
 
@@ -36,6 +38,45 @@ class EditConnectionViewModel(application: Application) : AndroidViewModel(appli
         val c = if (id <= 0L) null else repo.getById(id)
         loaded = c
         return c
+    }
+
+    fun testConnection(
+        protocol: Protocol,
+        host: String,
+        port: Int,
+        username: String,
+        password: String,
+        initialPath: String,
+        passiveMode: Boolean,
+        privateKey: String? = null,
+        passphrase: String? = null,
+        onResult: (success: Boolean, message: String) -> Unit
+    ) = viewModelScope.launch(Dispatchers.IO) {
+        try {
+            val testConn = Connection(
+                id = 0L,
+                name = "Test",
+                protocol = protocol,
+                host = host.trim(),
+                port = port,
+                username = username.trim(),
+                password = password,
+                initialPath = initialPath,
+                passiveMode = passiveMode,
+                privateKey = privateKey?.takeIf { it.isNotBlank() },
+                passphrase = passphrase?.takeIf { it.isNotBlank() }
+            )
+            val client = com.yoursftp.app.transfer.FileClientFactory.create(testConn)
+            client.connect()
+            client.disconnect()
+            withContext(Dispatchers.Main) {
+                onResult(true, "Koneksi berhasil terhubung!")
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                onResult(false, e.localizedMessage ?: e.message ?: "Gagal terhubung.")
+            }
+        }
     }
 
     fun save(
@@ -88,6 +129,8 @@ class AppViewModelFactory(private val application: Application) : ViewModelProvi
             com.yoursftp.app.db.DbViewModel(application) as T
         modelClass.isAssignableFrom(TerminalViewModel::class.java) ->
             TerminalViewModel(application) as T
+        modelClass.isAssignableFrom(com.yoursftp.app.ota.OtaViewModel::class.java) ->
+            com.yoursftp.app.ota.OtaViewModel(application) as T
         else -> throw IllegalArgumentException("Unknown ViewModel: ${modelClass.name}")
     }
 }

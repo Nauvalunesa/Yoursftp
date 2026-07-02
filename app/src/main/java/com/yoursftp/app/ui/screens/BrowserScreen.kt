@@ -35,6 +35,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -1075,6 +1077,15 @@ fun FilePane(
                         maxLines = 1
                     )
                 }
+                val clipboard = LocalClipboardManager.current
+                IconButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(tabState.currentPath))
+                    },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Salin Path", modifier = Modifier.size(14.dp))
+                }
             }
         }
 
@@ -1170,6 +1181,8 @@ private fun FileRow(
     onTransfer: () -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
+    var showDetailsDialog by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
     val (icon, tint) = getFileColorAndIcon(file.name, file.isDirectory)
 
     ListItem(
@@ -1252,6 +1265,19 @@ private fun FileRow(
                             onClick = { menu = false; onTransfer() }
                         )
                         DropdownMenuItem(
+                            text = { Text("Salin Path", fontSize = 12.sp) },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                            onClick = { 
+                                menu = false
+                                clipboard.setText(AnnotatedString(file.path))
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Detail", fontSize = 12.sp) },
+                            leadingIcon = { Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                            onClick = { menu = false; showDetailsDialog = true }
+                        )
+                        DropdownMenuItem(
                             text = { Text("Ganti Nama", fontSize = 12.sp) },
                             leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null, modifier = Modifier.size(14.dp)) },
                             onClick = { menu = false; onRename() }
@@ -1266,6 +1292,27 @@ private fun FileRow(
             }
         }
     )
+
+    if (showDetailsDialog) {
+        AlertDialog(
+            onDismissRequest = { showDetailsDialog = false },
+            title = { Text("Detail ${if (file.isDirectory) "Folder" else "File"}", fontWeight = FontWeight.Bold, fontSize = 15.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Nama: ${file.name}", fontSize = 13.sp)
+                    Text("Path: ${file.path}", fontSize = 13.sp)
+                    if (!file.isDirectory) {
+                        Text("Ukuran: ${humanSize(file.size)} (${file.size} bytes)", fontSize = 13.sp)
+                    }
+                    val dateStr = SimpleDateFormat("dd MMMM yyyy, HH:mm:ss", Locale.getDefault()).format(Date(file.lastModified))
+                    Text("Modifikasi: $dateStr", fontSize = 13.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDetailsDialog = false }) { Text("Tutup") }
+            }
+        )
+    }
 }
 
 @Composable

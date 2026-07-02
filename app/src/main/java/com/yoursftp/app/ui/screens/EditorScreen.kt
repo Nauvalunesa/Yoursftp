@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -94,63 +95,94 @@ fun EditorScreen(
                 val transformation = remember(highlighted) {
                     PrecomputedHighlightTransformation(highlighted)
                 }
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(verticalScrollState)
-                ) {
-                    // Line numbers column
-                    val lineCount = remember(state.content) { state.content.split('\n').size }
-                    val lineNumbersText = remember(lineCount) { (1..lineCount).joinToString("\n") }
-                    
-                    Column(
-                        modifier = Modifier
-                            .background(Color(0xFF1E1E1E)) // Darker gutter
-                            .padding(vertical = 12.dp)
-                            .widthIn(min = 40.dp)
-                    ) {
-                        Text(
-                            text = lineNumbersText,
-                            style = TextStyle(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 13.sp,
-                                lineHeight = 20.sp,
-                                color = Color(0xFF858585)
-                            ),
-                            modifier = Modifier.padding(horizontal = 8.dp)
-                        )
-                    }
-
-                    // Gutter separator line
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .width(1.dp)
-                            .background(Color(0xFF333333))
-                    )
-
-                    // Text Field with horizontal scrolling
-                    Box(
+                Column(Modifier.fillMaxSize()) {
+                    Row(
                         modifier = Modifier
                             .weight(1f)
-                            .horizontalScroll(horizontalScrollState)
-                            .padding(vertical = 12.dp)
+                            .verticalScroll(verticalScrollState)
                     ) {
-                        BasicTextField(
-                            value = state.content,
-                            onValueChange = vm::onContentChange,
-                            textStyle = TextStyle(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 13.sp,
-                                lineHeight = 20.sp,
-                                color = Color(0xFFD4D4D4) // One Dark Text Color
-                            ),
-                            cursorBrush = SolidColor(Color(0xFFAEAFAD)), // Active cursor color
+                        // Line numbers column
+                        val lineCount = remember(state.content) { state.content.split('\n').size }
+                        val lineNumbersText = remember(lineCount) { (1..lineCount).joinToString("\n") }
+                        
+                        Column(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp),
-                            visualTransformation = transformation
+                                .background(Color(0xFF1E1E1E)) // Darker gutter
+                                .padding(vertical = 12.dp)
+                                .widthIn(min = 40.dp)
+                        ) {
+                            Text(
+                                text = lineNumbersText,
+                                style = TextStyle(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 13.sp,
+                                    lineHeight = 20.sp,
+                                    color = Color(0xFF858585)
+                                ),
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+                        }
+
+                        // Gutter separator line
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(1.dp)
+                                .background(Color(0xFF333333))
                         )
+
+                        // Text Field with horizontal scrolling
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(horizontalScrollState)
+                                .padding(vertical = 12.dp)
+                        ) {
+                            BasicTextField(
+                                value = state.content,
+                                onValueChange = vm::onContentChange,
+                                textStyle = TextStyle(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 13.sp,
+                                    lineHeight = 20.sp,
+                                    color = Color(0xFFD4D4D4) // One Dark Text Color
+                                ),
+                                cursorBrush = SolidColor(Color(0xFFAEAFAD)), // Active cursor color
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp),
+                                visualTransformation = transformation
+                            )
+                        }
+                    }
+
+                    // Bottom Status Bar
+                    Surface(
+                        color = Color(0xFF007ACC), // VSCode blue bottom status bar
+                        contentColor = Color.White,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val lineCount = remember(state.content) { state.content.split('\n').size }
+                            val charCount = remember(state.content) { state.content.length }
+                            val fileExt = path.substringAfterLast('.', "").uppercase()
+                            
+                            Text(
+                                text = "Baris: $lineCount | Karakter: $charCount",
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = if (fileExt.isNotEmpty()) fileExt else "TEXT",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                     }
                 }
             }

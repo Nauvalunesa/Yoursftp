@@ -10,11 +10,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -42,6 +45,9 @@ fun EditConnectionScreen(
     var privateKey by remember { mutableStateOf("") }
     var passphrase by remember { mutableStateOf("") }
     var portEditedManually by remember { mutableStateOf(false) }
+
+    var testingConnection by remember { mutableStateOf(false) }
+    var testResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
 
     LaunchedEffect(connectionId) {
         val c = vm.load(connectionId)
@@ -108,7 +114,7 @@ fun EditConnectionScreen(
                                     .padding(vertical = 10.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(p.name, color = contentColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                  Text(p.name, color = contentColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
                         }
                     }
@@ -242,31 +248,92 @@ fun EditConnectionScreen(
                 }
             }
 
-            // Save Button
+            // Connection Test Result Card
+            testResult?.let { (success, msg) ->
+                val containerColor = if (success) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
+                val contentColor = if (success) Color(0xFF2E7D32) else Color(0xFFC62828)
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = containerColor),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (success) Icons.Default.CheckCircle else Icons.Default.Error,
+                            contentDescription = null,
+                            tint = contentColor
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = msg,
+                            color = contentColor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            // Dual Action Buttons (Test & Save)
             val credentialsValid = if (protocol == Protocol.SFTP) {
                 password.isNotBlank() || privateKey.isNotBlank()
             } else {
                 password.isNotBlank()
             }
-            Button(
-                onClick = {
-                    vm.save(
-                        existingId = if (connectionId > 0) connectionId else 0L,
-                        name = name, protocol = protocol, host = host,
-                        port = port.toIntOrNull() ?: Connection.defaultPort(protocol),
-                        username = username, password = password,
-                        initialPath = initialPath, passiveMode = passive,
-                        privateKey = privateKey, passphrase = passphrase,
-                        onDone = onBack
-                    )
-                },
-                enabled = host.isNotBlank() && username.isNotBlank() && credentialsValid,
-                shape = RoundedCornerShape(12.dp),
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(52.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Simpan Koneksi", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                OutlinedButton(
+                    onClick = {
+                        testingConnection = true
+                        testResult = null
+                        vm.testConnection(
+                            protocol = protocol, host = host,
+                            port = port.toIntOrNull() ?: Connection.defaultPort(protocol),
+                            username = username, password = password,
+                            initialPath = initialPath, passiveMode = passive,
+                            privateKey = privateKey, passphrase = passphrase,
+                            onResult = { success, msg ->
+                                testingConnection = false
+                                testResult = success to msg
+                            }
+                        )
+                    },
+                    enabled = !testingConnection && host.isNotBlank() && username.isNotBlank() && credentialsValid,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                ) {
+                    if (testingConnection) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("Uji Koneksi", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        vm.save(
+                            existingId = if (connectionId > 0) connectionId else 0L,
+                            name = name, protocol = protocol, host = host,
+                            port = port.toIntOrNull() ?: Connection.defaultPort(protocol),
+                            username = username, password = password,
+                            initialPath = initialPath, passiveMode = passive,
+                            privateKey = privateKey, passphrase = passphrase,
+                            onDone = onBack
+                        )
+                    },
+                    enabled = host.isNotBlank() && username.isNotBlank() && credentialsValid,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1.5f).fillMaxHeight()
+                ) {
+                    Text("Simpan Koneksi", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
             }
 
             Spacer(Modifier.height(24.dp))

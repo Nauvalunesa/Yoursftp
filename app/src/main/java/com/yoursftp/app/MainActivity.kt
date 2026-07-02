@@ -69,8 +69,10 @@ private fun AppNav(factory: AppViewModelFactory) {
 
         composable(Routes.CONNECTIONS) {
             val vm: ConnectionsViewModel = viewModel(factory)
+            val otaVm: com.yoursftp.app.ota.OtaViewModel = viewModel(factory)
             ConnectionsScreen(
                 vm = vm,
+                otaVm = otaVm,
                 onAdd = { nav.navigate(Routes.editConnection(null)) },
                 onEdit = { nav.navigate(Routes.editConnection(it.id)) },
                 onConnect = { nav.navigate(Routes.browser(it.id)) },

@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -28,16 +29,49 @@ import com.yoursftp.app.data.Protocol
 import com.yoursftp.app.ui.ConnectionsViewModel
 import kotlinx.coroutines.delay
 
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.yoursftp.app.ota.OtaState
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConnectionsScreen(
     vm: ConnectionsViewModel,
+    otaVm: com.yoursftp.app.ota.OtaViewModel,
     onAdd: () -> Unit,
     onEdit: (Connection) -> Unit,
     onConnect: (Connection) -> Unit,
     onOpenTerminal: (Connection) -> Unit
 ) {
+    val context = LocalContext.current
     val connections by vm.connections.collectAsState()
+    val otaState by otaVm.state.collectAsState()
+    var isManualChecking by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    val filteredConnections = remember(connections, searchQuery) {
+        if (searchQuery.isBlank()) {
+            connections
+        } else {
+            connections.filter { conn ->
+                conn.name.contains(searchQuery, ignoreCase = true) ||
+                conn.host.contains(searchQuery, ignoreCase = true) ||
+                conn.username.contains(searchQuery, ignoreCase = true)
+            }
+        }
+    }
+
+    val sftpCount = remember(connections) { connections.count { it.protocol == Protocol.SFTP } }
+    val ftpCount = remember(connections) { connections.count { it.protocol == Protocol.FTP || it.protocol == Protocol.FTPS } }
+    val s3Count = remember(connections) { connections.count { it.protocol == Protocol.S3 } }
+
+    LaunchedEffect(Unit) {
+        otaVm.checkForUpdate()
+    }
 
     Scaffold(
         topBar = {
@@ -45,8 +79,9 @@ fun ConnectionsScreen(
                 title = {
                     Column {
                         Text("YoursFTP", fontWeight = FontWeight.ExtraBold, fontSize = 24.sp)
+                        val stats = "SFTP: $sftpCount | FTP/S: $ftpCount | S3: $s3Count"
                         Text(
-                            "Kelola Koneksi VPS & FTP Anda",
+                            "Kelola Koneksi Anda ($stats)",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -55,7 +90,26 @@ fun ConnectionsScreen(
                 colors = TopAppBarDefaults.largeTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.onBackground
-                )
+                ),
+                actions = {
+                    IconButton(onClick = { showAboutDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Info & Donasi",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(onClick = {
+                        isManualChecking = true
+                        otaVm.checkForUpdate()
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.CloudDownload,
+                            contentDescription = "Periksa Update",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             )
         },
         floatingActionButton = {
@@ -87,22 +141,282 @@ fun ConnectionsScreen(
                 item {
                     Spacer(Modifier.height(4.dp))
                 }
-                itemsIndexed(connections, key = { _, conn -> conn.id }) { index, conn ->
-                    AnimateFadeInUp(delayMillis = index * 100) {
-                        ConnectionCard(
-                            conn = conn,
-                            onConnect = { onConnect(conn) },
-                            onEdit = { onEdit(conn) },
-                            onDelete = { vm.delete(conn) },
-                            onOpenTerminal = { onOpenTerminal(conn) }
-                        )
+                
+                // Connection Search Field
+                item {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Cari koneksi...", fontSize = 13.sp) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        textStyle = TextStyle(fontSize = 13.sp),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                if (filteredConnections.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Koneksi tidak ditemukan",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                } else {
+                    itemsIndexed(filteredConnections, key = { _, conn -> conn.id }) { index, conn ->
+                        AnimateFadeInUp(delayMillis = index * 100) {
+                            ConnectionCard(
+                                conn = conn,
+                                onConnect = { onConnect(conn) },
+                                onEdit = { onEdit(conn) },
+                                onDelete = { vm.delete(conn) },
+                                onOpenTerminal = { onOpenTerminal(conn) }
+                            )
+                        }
                     }
                 }
+                
                 item {
                     Spacer(Modifier.height(80.dp)) // padding for FAB
                 }
             }
         }
+    }
+
+    // Render Ota dialogs
+    when (val state = otaState) {
+        is OtaState.Checking -> {
+            if (isManualChecking) {
+                AlertDialog(
+                    onDismissRequest = {},
+                    title = { Text("Memeriksa Update") },
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            Text("Menghubungi server GitHub...")
+                        }
+                    },
+                    confirmButton = {}
+                )
+            }
+        }
+        is OtaState.UpToDate -> {
+            if (isManualChecking) {
+                AlertDialog(
+                    onDismissRequest = {
+                        otaVm.resetState()
+                        isManualChecking = false
+                    },
+                    title = { Text("Aplikasi Terkini") },
+                    text = { Text("Anda sudah menggunakan versi terbaru (${otaVm.currentVersion}).") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            otaVm.resetState()
+                            isManualChecking = false
+                        }) {
+                            Text("OK")
+                        }
+                    }
+                )
+            }
+        }
+        is OtaState.UpdateAvailable -> {
+            AlertDialog(
+                onDismissRequest = {
+                    otaVm.resetState()
+                    isManualChecking = false
+                },
+                title = { Text("Update Baru Tersedia!") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Versi baru ${state.version} sudah dirilis. Apakah Anda ingin mengunduh dan memasangnya sekarang?")
+                        Spacer(Modifier.height(4.dp))
+                        Text("Catatan Rilis:", fontWeight = FontWeight.Bold)
+                        Box(
+                          modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                            .padding(8.dp)
+                            .verticalScroll(rememberScrollState())
+                        ) {
+                            Text(
+                                text = state.changelog,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            otaVm.downloadAndInstall(state.downloadUrl)
+                        }
+                    ) {
+                        Text("Unduh & Pasang")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            otaVm.resetState()
+                            isManualChecking = false
+                        }
+                    ) {
+                        Text("Nanti")
+                    }
+                }
+            )
+        }
+        is OtaState.Downloading -> {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("Mengunduh Update") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val pct = (state.progress * 100).toInt()
+                        Text("Sedang mengunduh file APK: $pct%")
+                        LinearProgressIndicator(
+                            progress = { state.progress },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {}
+            )
+        }
+        is OtaState.ReadyToInstall -> {
+            AlertDialog(
+                onDismissRequest = {
+                    otaVm.resetState()
+                    isManualChecking = false
+                },
+                title = { Text("Unduhan Selesai") },
+                text = { Text("File update APK berhasil diunduh. Pasang sekarang?") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            otaVm.triggerInstall(state.apkFile)
+                        }
+                    ) {
+                        Text("Pasang")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            otaVm.resetState()
+                            isManualChecking = false
+                        }
+                    ) {
+                        Text("Batal")
+                    }
+                }
+            )
+        }
+        is OtaState.Error -> {
+            AlertDialog(
+                onDismissRequest = {
+                    otaVm.resetState()
+                    isManualChecking = false
+                },
+                title = { Text("Gagal Memperbarui") },
+                text = { Text("Terjadi kesalahan: ${state.message}") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            otaVm.resetState()
+                            isManualChecking = false
+                        }
+                    ) {
+                        Text("OK")
+                    }
+                }
+            )
+        }
+        OtaState.Idle -> { /* do nothing */ }
+    }
+
+    if (showAboutDialog) {
+        AlertDialog(
+            onDismissRequest = { showAboutDialog = false },
+            title = { Text("Hubungi & Dukung", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Jika Anda membutuhkan bantuan atau konsultasi, silakan hubungi pengembang:")
+                    
+                    Button(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/6281776348790"))
+                            context.startActivity(intent)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Phone, contentDescription = null, tint = Color.White)
+                        Spacer(Modifier.width(8.dp))
+                        Text("WhatsApp: 081776348790", color = Color.White)
+                    }
+                    
+                    Button(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/Nvlunesa"))
+                            context.startActivity(intent)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0088cc)),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Send, contentDescription = null, tint = Color.White)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Telegram: @Nvlunesa", color = Color.White)
+                    }
+                    
+                    Spacer(Modifier.height(8.dp))
+                    Text("Dukung pengembangan aplikasi ini dengan donasi:", fontWeight = FontWeight.Bold)
+                    
+                    Button(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://mustikapayment.com/l/Payment"))
+                            context.startActivity(intent)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Favorite, contentDescription = null, tint = Color.White)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Dukung via Mustika Payment", color = Color.White)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAboutDialog = false }) {
+                    Text("Tutup")
+                }
+            }
+        )
     }
 }
 

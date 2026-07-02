@@ -5,7 +5,7 @@
 [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)](https://developer.android.com/compose)
 [![Gradle](https://img.shields.io/badge/Build-Gradle-02303A?style=for-the-badge&logo=gradle&logoColor=white)](https://gradle.org)
 
-Aplikasi Android tangguh berbasis **Kotlin + Jetpack Compose** dan **Material 3** untuk mengelola server remote Anda dengan mudah. Tidak hanya sekadar browser file FTP/SFTP, YoursFTP dilengkapi dengan berbagai alat bantu pengembang (*Developer Tools*) terintegrasi seperti **Terminal Emulator**, **Editor Teks Lanjutan**, dan **Penampil Database SQL & NoSQL**.
+**YoursFTP** adalah aplikasi Android tangguh berbasis **Kotlin + Jetpack Compose** dan **Material 3** untuk mengelola server remote Anda dengan mudah. Tidak hanya sekadar browser file FTP/SFTP biasa, YoursFTP dilengkapi dengan berbagai alat bantu pengembang (*Developer Tools*) terintegrasi yang premium seperti **Terminal Emulator interaktif dengan pintasan perintah**, **Editor Teks dengan status bar VSCode**, dan **Penampil Database SQL & NoSQL multi-format dengan pencarian instan**.
 
 ---
 
@@ -19,27 +19,39 @@ Aplikasi Android tangguh berbasis **Kotlin + Jetpack Compose** dan **Material 3*
   * **Local File System** (Penyimpanan Lokal Android)
 * Manajemen profil koneksi tanpa batas menggunakan database **Room DB** lokal yang aman.
 * Operasi file standar: navigasi direktori cepat, buat berkas/folder baru, ganti nama (*rename*), dan hapus (*delete*).
+* **Salin Path Folder/File:** Salin alamat absolut folder aktif atau path file individu ke clipboard dalam satu kali ketuk.
+* **Detail File Lengkap:** Tampilkan info detail file (ukuran bytes/human-readable, path absolut, modifikasi terakhir).
 
-### 2. Terminal Emulator Interaktif (VT100/xterm)
+### 2. Uji Koneksi Instan (Test Connection)
+* Validasi host, port, username, password, atau SSH Private Key Anda langsung sebelum disimpan.
+* Memberikan status indikasi real-time berupa banner status (Warna hijau sukses terhubung atau warna merah jika gagal beserta detail pesan kesalahannya).
+
+### 3. Terminal Emulator Interaktif dengan Pintasan Perintah (VT100/xterm)
 * Jalankan perintah shell langsung di server remote Anda.
 * Mendukung gamut warna penuh: **16-color, 256-color, hingga Truecolor (24-bit)**.
-* Mendukung mode tampilan alternatif (alternate screen buffer) untuk menjalankan aplikasi berbasis terminal seperti `vim`, `htop`, atau `less`.
+* Mendukung mode tampilan alternatif (alternate screen buffer) untuk aplikasi berbasis terminal seperti `vim`, `htop`, atau `less`.
 * Memiliki parser state-machine tangguh dengan riwayat scrollback hingga **5000 baris**.
+* **Pintasan Perintah (Quick Commands Snippets):** Eksekusi perintah linux umum (`ls -la`, `df -h`, `free -m`, `top`, dll.) instan dengan sekali tap.
+* **Snippets Kustom:** Tambahkan perintah favorit Anda sendiri ke dalam daftar pintasan terminal untuk menghemat waktu mengetik di mobile keyboard.
 
-### 3. Editor Teks Lanjutan (*Large File Editor*)
+### 4. Editor Teks Lanjutan (*Large File Editor*)
 * Buka, edit, dan simpan kembali berkas teks berukuran besar secara instan ke server remote.
 * Dilengkapi dengan **Syntax Highlighting** otomatis untuk berbagai bahasa pemrograman:
   * Kotlin, Java, Python, C/C++, Go, JavaScript, TypeScript, HTML, CSS, XML, JSON, CSV, Shell Script (`.sh`), YAML, dan konfigurasi lainnya.
-* Menggunakan font monospace teroptimasi untuk keterbacaan kode yang maksimal.
+* **IDE-Style Status Bar:** Tampilan status bar di bagian bawah editor yang menunjukkan **Jumlah Baris**, **Jumlah Karakter**, dan **Ekstensi Dokumen** secara dinamis (seperti VSCode).
 
-### 4. Penampil Database Multi-Format (SQL & NoSQL)
+### 5. Penampil Database Multi-Format (SQL & NoSQL)
 Membaca berbagai format database langsung dari browser berkas tanpa aplikasi pihak ketiga:
 * **SQLite (`.db`, `.sqlite`, `.sqlite3`, `.db3`, `.sqlitedb`)**: Menampilkan daftar tabel, baris data secara paginasi, dan eksekusi query SQL kustom penuh.
-* **SQL Dump (`.sql`)**: Secara cerdas memuat isi dump SQL ke dalam database SQLite *in-memory* secara dinamis, menguraikan dialek (seperti MySQL backticks & auto-increment), dan mengekspos tabel untuk di-query.
+* **SQL Dump (`.sql`)**: Secara cerdas memuat isi dump SQL ke dalam database SQLite *in-memory* secara dinamis.
 * **JSON / NoSQL (`.json`, `.jsonl`, `.ndjson`, `.geojson`)**: Ekstraksi struktur baris-kolom otomatis dari JSON array, nested arrays, atau skema key-value global.
-* **BSON (`.bson`)**: Dukungan pembacaan biner terstruktur berbasis skema JSON.
-* **CSV / TSV (`.csv`, `.tsv`)**: Parsing tabel presisi sesuai standar RFC 4180 termasuk penanganan tanda kutip ganda dan baris baru di dalam field.
-* **XML Data (`.xml`)**: Parsing otomatis tag bersarang sebagai baris tabel serta pembersihan namespace XML.
+* **CSV / TSV / BSON / XML**: Membaca CSV presisi, file biner BSON terstruktur, dan parsing XML otomatis.
+* **Pencarian & Filter Instan:** Cari kata kunci apapun di dalam tabel yang aktif; baris akan disaring secara instan seiring Anda mengetik.
+* **Skalabilitas Grid & Zoom Kolom:** Sesuaikan lebar kolom (+/-) dan tap sel manapun untuk melihat detail teks penuh serta menyalinnya.
+
+### 6. Pembaruan OTA (Over-The-Air) Otomatis via GitHub
+* Pemeriksaan versi latar belakang otomatis saat startup ke repositori GitHub.
+* Mengunduh file APK rilis resmi terbaru secara otomatis ke cache direktori dan memicu sistem instalasi Android internal secara aman.
 
 ---
 
@@ -115,6 +127,9 @@ app/src/main/java/com/yoursftp/app/
 │   ├── XmlDbReader.kt              # Pembaca berkas XML
 │   ├── DbViewModel.kt              # ViewModel penampil database
 │   └── DbViewerScreen.kt           # Layar tabel database Material 3
+├── ota/                            # Pembaruan OTA (Over-The-Air)
+│   ├── OtaUpdater.kt               # Logic parser rilis API GitHub & Download
+│   └── OtaViewModel.kt             # VM status pembaruan
 └── ui/                             # UI Global
     ├── screens/                    # Layar UI (Browser, Connections, Terminal)
     ├── theme/                      # Skema Warna & Tema Material 3
@@ -152,3 +167,13 @@ Setelah proses selesai, berkas APK terbaru dapat Anda temukan di:
 * **Koneksi SFTP**: Menggunakan konfigurasi `StrictHostKeyChecking=no` untuk mempercepat demonstrasi. Di lingkungan produksi, Anda disarankan untuk mendaftarkan *known hosts* demi mencegah serangan Man-in-the-Middle (MitM).
 * **Penyimpanan Kredensial**: Password disimpan dalam database Room lokal. Untuk keamanan produksi, disarankan menggunakan database terenkripsi seperti **SQLCipher** atau memanfaatkan **Android Keystore**.
 * **Keamanan Jaringan**: `usesCleartextTraffic=true` diaktifkan di manifest agar koneksi FTP standar (tanpa enkripsi SSL/TLS) tetap dapat diakses di Android versi modern.
+
+---
+
+## 💬 Hubungi & Dukung Kami
+Jika Anda membutuhkan bantuan, ingin melaporkan masalah, atau ingin memberikan dukungan donasi untuk pengembangan lebih lanjut:
+* **WhatsApp:** [Hubungi via WhatsApp (081776348790)](https://wa.me/6281776348790)
+* **Telegram:** [Hubungi via Telegram (Nvlunesa)](https://t.me/Nvlunesa)
+* **Link Donasi & Support:** [Mustika Payment Donation Link](https://mustikapayment.com/l/Payment)
+
+*YoursFTP dikembangkan dengan cinta untuk komunitas pengembang!* ❤️

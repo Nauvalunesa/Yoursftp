@@ -21,7 +21,11 @@ data class DbState(
     val query: String = "",
     val error: String? = null,
     val format: DbFormat? = null,
-    val supportsQuery: Boolean = true
+    val supportsQuery: Boolean = true,
+    // Pagination fields
+    val page: Int = 0,
+    val pageSize: Int = 100,
+    val totalRows: Long = 0
 )
 
 class DbViewModel(application: Application) : AndroidViewModel(application) {
@@ -54,26 +58,97 @@ class DbViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setFormatOverride(format: DbFormat) {
+        val path = openedPath ?: return
+        _state.value = _state.value.copy(loading = true, format = format, error = null)
+        viewModelScope.launch {
+            try {
+                val (tables, supportsQuery) = withContext(Dispatchers.IO) {
+                    reader?.close()
+                    val r = createDbReader(path, format)
+                    r.open()
+                    reader = r
+                    r.tables() to r.supportsCustomQuery
+                }
+                _state.value = _state.value.copy(
+                    loading = false,
+                    tables = tables,
+                    supportsQuery = supportsQuery,
+                    selectedTable = tables.firstOrNull(),
+                    columns = emptyList(),
+                    rows = emptyList(),
+                    rowInfo = ""
+                )
+                tables.firstOrNull()?.let { selectTable(it) }
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(loading = false, error = e.message ?: "Gagal membuka database dengan format ${format.label}")
+            }
+        }
+    }
+
     fun selectTable(table: String) {
+        _state.value = _state.value.copy(selectedTable = table, page = 0)
+        loadCurrentTablePage()
+    }
+
+    private fun loadCurrentTablePage() {
         val r = reader ?: return
-        _state.value = _state.value.copy(loading = true, selectedTable = table, error = null)
+        val table = _state.value.selectedTable ?: return
+        val page = _state.value.page
+        val pageSize = _state.value.pageSize
+        _state.value = _state.value.copy(loading = true, error = null)
         viewModelScope.launch {
             try {
                 val (result, count) = withContext(Dispatchers.IO) {
-                    r.tableRows(table, limit = 200) to r.rowCount(table)
+                    r.tableRows(table, limit = pageSize, offset = page * pageSize) to r.rowCount(table)
                 }
+                val startRow = if (count > 0) page * pageSize + 1 else 0
+                val endRow = minOf((page + 1) * pageSize, count.toInt())
                 _state.value = _state.value.copy(
                     loading = false,
                     columns = result.columns,
                     rows = result.rows,
                     truncated = result.truncated,
-                    rowInfo = "${result.rows.size} dari $count baris",
-                    query = "SELECT * FROM \"$table\" LIMIT 200"
+                    totalRows = count,
+                    rowInfo = "Menampilkan baris $startRow - $endRow dari $count baris",
+                    query = "SELECT * FROM \"$table\" LIMIT $pageSize OFFSET ${page * pageSize}"
                 )
             } catch (e: Exception) {
                 _state.value = _state.value.copy(loading = false, error = e.message ?: "Gagal membaca tabel")
             }
         }
+    }
+
+    fun nextPage() {
+        val currentPage = _state.value.page
+        val total = _state.value.totalRows
+        val size = _state.value.pageSize
+        if ((currentPage + 1) * size < total) {
+            _state.value = _state.value.copy(page = currentPage + 1)
+            loadCurrentTablePage()
+        }
+    }
+
+    fun prevPage() {
+        val currentPage = _state.value.page
+        if (currentPage > 0) {
+            _state.value = _state.value.copy(page = currentPage - 1)
+            loadCurrentTablePage()
+        }
+    }
+
+    fun jumpToPage(targetPage: Int) {
+        val size = _state.value.pageSize
+        val total = _state.value.totalRows
+        val maxPage = if (total > 0) ((total - 1) / size).toInt() else 0
+        val page = targetPage.coerceIn(0, maxPage)
+        _state.value = _state.value.copy(page = page)
+        loadCurrentTablePage()
+    }
+
+    fun setPageSize(size: Int) {
+        _state.value = _state.value.copy(pageSize = size, page = 0)
+        loadCurrentTablePage()
     }
 
     fun setQuery(q: String) { _state.value = _state.value.copy(query = q) }

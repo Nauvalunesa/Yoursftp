@@ -2,6 +2,7 @@ package com.yoursftp.app.ui.screens
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.*
 import android.content.ClipboardManager
 import android.content.Context
@@ -98,6 +100,15 @@ fun TerminalScreen(
     // Baseline untuk diff input (real-time typing).
     var input by remember { mutableStateOf(TextFieldValue("")) }
 
+    var showShortcutDialog by remember { mutableStateOf(false) }
+    val defaultShortcuts = remember {
+        listOf(
+            "ls -la", "cd ..", "pwd", "df -h", "free -m", "top", "uname -a", "history", "ping -c 4 1.1.1.1"
+        )
+    }
+    var customShortcuts by remember { mutableStateOf(listOf<String>()) }
+    var newShortcutText by remember { mutableStateOf("") }
+
     val pulse = rememberInfiniteTransition(label = "pulse")
     val dotAlpha by pulse.animateFloat(
         initialValue = 0.25f, targetValue = 1f,
@@ -154,7 +165,7 @@ fun TerminalScreen(
                 actions = {
                     IconButton(onClick = {
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setText(vm.screenText())
+                        cm.setText(AnnotatedString(vm.screenText()))
                     }) { Icon(Icons.Default.ContentCopy, contentDescription = "Salin layar") }
                     IconButton(onClick = { vm.clearConsole() }) {
                         Icon(Icons.Default.Delete, contentDescription = "Bersihkan")
@@ -240,14 +251,99 @@ fun TerminalScreen(
             }
 
             // Baris tombol panah + aksesori
-            ArrowRow(vm)
+            ArrowRow(vm) { showShortcutDialog = true }
             AccessoryRow(vm)
         }
+    }
+
+    if (showShortcutDialog) {
+        AlertDialog(
+            onDismissRequest = { showShortcutDialog = false },
+            title = { Text("Pintasan Perintah", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Text("Pilih perintah untuk dijalankan langsung:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                            .border(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                            .padding(4.dp)
+                    ) {
+                        val allCmds = defaultShortcuts + customShortcuts
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            items(allCmds) { cmd ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            vm.sendText(cmd + "\r")
+                                            showShortcutDialog = false
+                                        }
+                                        .padding(8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(cmd, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                    if (cmd in customShortcuts) {
+                                        IconButton(
+                                            onClick = { customShortcuts = customShortcuts.filter { it != cmd } },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Hapus",
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    Spacer(Modifier.height(8.dp))
+                    Text("Tambah Perintah Kustom:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = newShortcutText,
+                            onValueChange = { newShortcutText = it },
+                            placeholder = { Text("e.g. git status", fontSize = 11.sp) },
+                            singleLine = true,
+                            textStyle = TextStyle(fontSize = 12.sp),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = {
+                                if (newShortcutText.isNotBlank()) {
+                                    customShortcuts = customShortcuts + newShortcutText.trim()
+                                    newShortcutText = ""
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text("Tambah", fontSize = 12.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showShortcutDialog = false }) {
+                    Text("Tutup")
+                }
+            }
+        )
     }
 }
 
 @Composable
-private fun ArrowRow(vm: TerminalViewModel) {
+private fun ArrowRow(vm: TerminalViewModel, onShowShortcuts: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().background(Color(0xFF1E293B)).padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -267,6 +363,12 @@ private fun ArrowRow(vm: TerminalViewModel) {
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Kanan", tint = Color(0xFFCBD5E1))
         }
         Spacer(Modifier.weight(1f))
+        
+        // Pintasan Perintah (Quick Commands) Button
+        IconButton(onClick = onShowShortcuts) {
+            Icon(Icons.Default.List, "Pintasan Perintah", tint = Color(0xFF38BDF8))
+        }
+
         IconButton(onClick = {
             val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             val clip = cm.primaryClip

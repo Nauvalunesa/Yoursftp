@@ -31,6 +31,7 @@ import androidx.compose.ui.input.key.*
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
@@ -151,7 +152,7 @@ fun LargeEditorScreen(
                     onClose = vm::toggleSearch
                 )
             }
-            BoxWithConstraints(Modifier.fillMaxSize()) {
+            BoxWithConstraints(Modifier.fillMaxSize().weight(1f)) {
                 if (state.loading) {
                     Column(
                         Modifier.align(Alignment.Center),
@@ -248,6 +249,31 @@ fun LargeEditorScreen(
             // Bar prediksi kode (muncul saat ada saran untuk prefix yang diketik).
             if (state.suggestions.isNotEmpty()) {
                 SuggestionBar(state.suggestions) { word -> pendingWord = word }
+            }
+
+            // Bottom Status Bar
+            Surface(
+                color = Color(0xFF007ACC),
+                contentColor = Color.White,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Baris: ${state.lineCount} | Mesin: Editor Besar (Large)",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = vm.ext.uppercase(),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
             }
         }
     }
