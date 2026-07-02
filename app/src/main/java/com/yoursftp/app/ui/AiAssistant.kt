@@ -5,8 +5,6 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
@@ -14,6 +12,13 @@ import java.net.URL
 enum class AiMode {
     OFFLINE,
     ONLINE
+}
+
+enum class AiProvider {
+    GEMINI,
+    OPENAI,
+    CLAUDE,
+    CUSTOM
 }
 
 class AiAssistant(context: Context) {
@@ -28,26 +33,89 @@ class AiAssistant(context: Context) {
             prefs.edit().putString("ai_mode", value.name).apply()
         }
 
+    var aiProvider: AiProvider
+        get() {
+            val providerStr = prefs.getString("ai_provider", AiProvider.GEMINI.name)
+            return try { AiProvider.valueOf(providerStr ?: AiProvider.GEMINI.name) } catch (e: Exception) { AiProvider.GEMINI }
+        }
+        set(value) {
+            prefs.edit().putString("ai_provider", value.name).apply()
+        }
+
+    // Gemini Settings
     var geminiApiKey: String
         get() = prefs.getString("gemini_api_key", "") ?: ""
-        set(value) {
-            prefs.edit().putString("gemini_api_key", value.trim()).apply()
-        }
+        set(value) { prefs.edit().putString("gemini_api_key", value.trim()).apply() }
+
+    // OpenAI Settings
+    var openaiApiKey: String
+        get() = prefs.getString("openai_api_key", "") ?: ""
+        set(value) { prefs.edit().putString("openai_api_key", value.trim()).apply() }
+
+    var openaiBaseUrl: String
+        get() = prefs.getString("openai_base_url", "https://api.openai.com/v1/chat/completions") ?: "https://api.openai.com/v1/chat/completions"
+        set(value) { prefs.edit().putString("openai_base_url", value.trim()).apply() }
+
+    var openaiModel: String
+        get() = prefs.getString("openai_model", "gpt-4o-mini") ?: "gpt-4o-mini"
+        set(value) { prefs.edit().putString("openai_model", value.trim()).apply() }
+
+    // Claude Settings
+    var claudeApiKey: String
+        get() = prefs.getString("claude_api_key", "") ?: ""
+        set(value) { prefs.edit().putString("claude_api_key", value.trim()).apply() }
+
+    var claudeModel: String
+        get() = prefs.getString("claude_model", "claude-3-5-sonnet-20241022") ?: "claude-3-5-sonnet-20241022"
+        set(value) { prefs.edit().putString("claude_model", value.trim()).apply() }
+
+    // Custom API Settings (Ollama, DeepSeek, Groq, OpenRouter, dll.)
+    var customApiKey: String
+        get() = prefs.getString("custom_api_key", "") ?: ""
+        set(value) { prefs.edit().putString("custom_api_key", value.trim()).apply() }
+
+    var customBaseUrl: String
+        get() = prefs.getString("custom_base_url", "") ?: ""
+        set(value) { prefs.edit().putString("custom_base_url", value.trim()).apply() }
+
+    var customModel: String
+        get() = prefs.getString("custom_model", "") ?: ""
+        set(value) { prefs.edit().putString("custom_model", value.trim()).apply() }
+
 
     /** Menghasilkan perintah Linux berdasarkan Prompt. */
     suspend fun generateCommand(prompt: String): Pair<String, String> = withContext(Dispatchers.IO) {
-        if (aiMode == AiMode.ONLINE) {
-            val key = geminiApiKey
-            if (key.isBlank()) {
-                return@withContext "Error" to "Silakan masukkan Gemini API Key Anda di pengaturan AI terlebih dahulu."
-            }
-            try {
-                return@withContext queryGeminiApi(prompt, key)
-            } catch (e: Exception) {
-                return@withContext "Error" to "Gagal menghubungi Gemini API: ${e.localizedMessage ?: e.message}. Pastikan koneksi internet aktif dan API Key valid."
-            }
-        } else {
+        if (aiMode == AiMode.OFFLINE) {
             return@withContext generateOfflineCommand(prompt)
+        }
+
+        try {
+            return@withContext when (aiProvider) {
+                AiProvider.GEMINI -> {
+                    val key = geminiApiKey
+                    if (key.isBlank()) "Error" to "Silakan masukkan Gemini API Key Anda."
+                    else queryGeminiApi(prompt, key)
+                }
+                AiProvider.OPENAI -> {
+                    val key = openaiApiKey
+                    if (key.isBlank()) "Error" to "Silakan masukkan OpenAI API Key Anda."
+                    else queryOpenAiApi(prompt, key, openaiBaseUrl, openaiModel)
+                }
+                AiProvider.CLAUDE -> {
+                    val key = claudeApiKey
+                    if (key.isBlank()) "Error" to "Silakan masukkan Claude API Key Anda."
+                    else queryClaudeApi(prompt, key, claudeModel)
+                }
+                AiProvider.CUSTOM -> {
+                    val key = customApiKey
+                    val url = customBaseUrl
+                    val model = customModel
+                    if (url.isBlank()) "Error" to "Silakan masukkan Base URL Endpoint Custom."
+                    else queryOpenAiApi(prompt, key, url, model)
+                }
+            }
+        } catch (e: Exception) {
+            return@withContext "Error" to "Gagal menghubungi API AI (${aiProvider.name}): ${e.localizedMessage ?: e.message}."
         }
     }
 
@@ -81,8 +149,6 @@ class AiAssistant(context: Context) {
         if (responseCode == HttpURLConnection.HTTP_OK) {
             val responseText = conn.inputStream.bufferedReader().use { it.readText() }
             val responseJson = JSONObject(responseText)
-            
-            // Extract the generated text
             val candidates = responseJson.optJSONArray("candidates")
             if (candidates != null && candidates.length() > 0) {
                 val firstCandidate = candidates.getJSONObject(0)
@@ -91,22 +157,7 @@ class AiAssistant(context: Context) {
                     val parts = content.optJSONArray("parts")
                     if (parts != null && parts.length() > 0) {
                         val rawText = parts.getJSONObject(0).optString("text", "").trim()
-                        
-                        // Bersihkan blok markdown ```json jika ada
-                        val cleanJsonText = rawText
-                            .removePrefix("```json")
-                            .removePrefix("```")
-                            .removeSuffix("```")
-                            .trim()
-
-                        try {
-                            val parsedResult = JSONObject(cleanJsonText)
-                            val command = parsedResult.optString("command", "echo \"Perintah kosong\"")
-                            val explanation = parsedResult.optString("explanation", "Tidak ada penjelasan.")
-                            return command to explanation
-                        } catch (e: Exception) {
-                            return rawText to "Gagal mengurai respon JSON dari Gemini. Menampilkan teks mentah."
-                        }
+                        return parseJsonResponse(rawText)
                     }
                 }
             }
@@ -114,6 +165,124 @@ class AiAssistant(context: Context) {
         } else {
             val errorText = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "Unknown error"
             return "Error ($responseCode)" to errorText
+        }
+    }
+
+    private fun queryOpenAiApi(prompt: String, apiKey: String, endpointUrl: String, modelName: String): Pair<String, String> {
+        val systemInstruction = "Anda adalah asisten pengembang sistem Linux. Berikan rekomendasi perintah terminal berdasarkan input pengguna. Tanggapan Anda HARUS dalam format JSON mentah (raw JSON) yang valid tanpa kode blok markdown atau teks pengantar lainnya. Gunakan format persis seperti ini: {\"command\": \"perintah_linux\", \"explanation\": \"penjelasan singkat dalam bahasa Indonesia\"}. Jangan ada teks lain."
+        
+        val url = URL(endpointUrl)
+        val conn = url.openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.setRequestProperty("Content-Type", "application/json")
+        if (apiKey.isNotBlank()) {
+            conn.setRequestProperty("Authorization", "Bearer $apiKey")
+        }
+        conn.doOutput = true
+
+        val messagesArray = org.json.JSONArray().apply {
+            put(JSONObject().apply {
+                put("role", "system")
+                put("content", systemInstruction)
+            })
+            put(JSONObject().apply {
+                put("role", "user")
+                put("content", prompt)
+            })
+        }
+
+        val requestBody = JSONObject().apply {
+            put("model", modelName)
+            put("messages", messagesArray)
+            // Paksa format JSON jika penyedia mendukung
+            put("response_format", JSONObject().apply { put("type", "json_object") })
+        }
+
+        OutputStreamWriter(conn.outputStream).use { writer ->
+            writer.write(requestBody.toString())
+            writer.flush()
+        }
+
+        val responseCode = conn.responseCode
+        if (responseCode == HttpURLConnection.HTTP_OK) {
+            val responseText = conn.inputStream.bufferedReader().use { it.readText() }
+            val responseJson = JSONObject(responseText)
+            val choices = responseJson.optJSONArray("choices")
+            if (choices != null && choices.length() > 0) {
+                val firstChoice = choices.getJSONObject(0)
+                val message = firstChoice.optJSONObject("message")
+                if (message != null) {
+                    val rawContent = message.optString("content", "").trim()
+                    return parseJsonResponse(rawContent)
+                }
+            }
+            return "echo \"Error\"" to "Respon dari OpenAI-compatible API kosong."
+        } else {
+            val errorText = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "Unknown error"
+            return "Error ($responseCode)" to errorText
+        }
+    }
+
+    private fun queryClaudeApi(prompt: String, apiKey: String, modelName: String): Pair<String, String> {
+        val systemInstruction = "Anda adalah asisten pengembang sistem Linux. Berikan rekomendasi perintah terminal berdasarkan input pengguna. Tanggapan Anda HARUS dalam format JSON mentah (raw JSON) yang valid tanpa kode blok markdown atau teks pengantar lainnya. Gunakan format persis seperti ini: {\"command\": \"perintah_linux\", \"explanation\": \"penjelasan singkat dalam bahasa Indonesia\"}. Jangan ada teks lain."
+        
+        val url = URL("https://api.anthropic.com/v1/messages")
+        val conn = url.openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.setRequestProperty("x-api-key", apiKey)
+        conn.setRequestProperty("anthropic-version", "2023-06-01")
+        conn.doOutput = true
+
+        val messagesArray = org.json.JSONArray().apply {
+            put(JSONObject().apply {
+                put("role", "user")
+                put("content", prompt)
+            })
+        }
+
+        val requestBody = JSONObject().apply {
+            put("model", modelName)
+            put("max_tokens", 1024)
+            put("system", systemInstruction)
+            put("messages", messagesArray)
+        }
+
+        OutputStreamWriter(conn.outputStream).use { writer ->
+            writer.write(requestBody.toString())
+            writer.flush()
+        }
+
+        val responseCode = conn.responseCode
+        if (responseCode == HttpURLConnection.HTTP_OK) {
+            val responseText = conn.inputStream.bufferedReader().use { it.readText() }
+            val responseJson = JSONObject(responseText)
+            val contentArray = responseJson.optJSONArray("content")
+            if (contentArray != null && contentArray.length() > 0) {
+                val firstContent = contentArray.getJSONObject(0)
+                val rawText = firstContent.optString("text", "").trim()
+                return parseJsonResponse(rawText)
+            }
+            return "echo \"Error\"" to "Respon dari Claude kosong."
+        } else {
+            val errorText = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "Unknown error"
+            return "Error ($responseCode)" to errorText
+        }
+    }
+
+    private fun parseJsonResponse(rawText: String): Pair<String, String> {
+        val cleanJsonText = rawText
+            .removePrefix("```json")
+            .removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+        try {
+            val parsedResult = JSONObject(cleanJsonText)
+            val command = parsedResult.optString("command", "echo \"Perintah kosong\"")
+            val explanation = parsedResult.optString("explanation", "Tidak ada penjelasan.")
+            return command to explanation
+        } catch (e: Exception) {
+            return cleanJsonText to "Gagal mengurai respon JSON dari model. Menampilkan teks mentah."
         }
     }
 

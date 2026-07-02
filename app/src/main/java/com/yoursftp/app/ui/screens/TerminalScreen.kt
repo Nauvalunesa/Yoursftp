@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -59,6 +60,7 @@ import com.yoursftp.app.ui.TermKey
 import com.yoursftp.app.ui.TerminalViewModel
 import com.yoursftp.app.ui.AiAssistant
 import com.yoursftp.app.ui.AiMode
+import com.yoursftp.app.ui.AiProvider
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -126,7 +128,20 @@ fun TerminalScreen(
     // AI Assistant Integration
     val aiAssistant = remember { AiAssistant(context) }
     var aiMode by remember { mutableStateOf(aiAssistant.aiMode) }
+    var aiProvider by remember { mutableStateOf(aiAssistant.aiProvider) }
     var geminiApiKey by remember { mutableStateOf(aiAssistant.geminiApiKey) }
+
+    var openaiApiKey by remember { mutableStateOf(aiAssistant.openaiApiKey) }
+    var openaiBaseUrl by remember { mutableStateOf(aiAssistant.openaiBaseUrl) }
+    var openaiModel by remember { mutableStateOf(aiAssistant.openaiModel) }
+
+    var claudeApiKey by remember { mutableStateOf(aiAssistant.claudeApiKey) }
+    var claudeModel by remember { mutableStateOf(aiAssistant.claudeModel) }
+
+    var customApiKey by remember { mutableStateOf(aiAssistant.customApiKey) }
+    var customBaseUrl by remember { mutableStateOf(aiAssistant.customBaseUrl) }
+    var customModel by remember { mutableStateOf(aiAssistant.customModel) }
+
     var loadingAi by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -392,7 +407,7 @@ fun TerminalScreen(
         )
     }
 
-    // Dialog AI Copilot Generator (Dual Mode: Offline vs Online Gemini)
+    // Dialog AI Copilot Generator (Multi-Engine & Custom Auth)
     if (showAiCopilotDialog) {
         AlertDialog(
             onDismissRequest = { 
@@ -408,7 +423,10 @@ fun TerminalScreen(
                 }
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                ) {
                     
                     // AI Configuration Settings in Dialog
                     Card(
@@ -417,14 +435,14 @@ fun TerminalScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Pengaturan AI", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = accentColor)
+                            Text("Konfigurasi AI Engine", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = accentColor)
                             
-                            // Mode selector
+                            // Mode selector: Offline vs Online
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                val modes = listOf(AiMode.OFFLINE to "Offline", AiMode.ONLINE to "Gemini API")
+                                val modes = listOf(AiMode.OFFLINE to "Offline Mode", AiMode.ONLINE to "Online Mode")
                                 modes.forEach { (mode, label) ->
                                     val isSelected = aiMode == mode
                                     Box(
@@ -444,20 +462,158 @@ fun TerminalScreen(
                                 }
                             }
 
-                            // API Key Field (if Online selected)
+                            // Provider Selector (If Online selected)
                             if (aiMode == AiMode.ONLINE) {
-                                OutlinedTextField(
-                                    value = geminiApiKey,
-                                    onValueChange = {
-                                        geminiApiKey = it
-                                        aiAssistant.geminiApiKey = it
-                                    },
-                                    placeholder = { Text("Masukkan Gemini API Key...", fontSize = 11.sp) },
-                                    label = { Text("Gemini API Key", fontSize = 10.sp) },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    textStyle = TextStyle(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                                )
+                                Divider(color = buttonBg, thickness = 0.5.dp)
+                                Text("Pilih Penyedia AI:", fontSize = 11.sp, color = defaultFg)
+                                
+                                // Simple Grid / Column for Providers
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    val row1 = listOf(AiProvider.GEMINI to "Gemini", AiProvider.OPENAI to "OpenAI")
+                                    val row2 = listOf(AiProvider.CLAUDE to "Claude", AiProvider.CUSTOM to "Custom API")
+                                    
+                                    listOf(row1, row2).forEach { rowList ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            rowList.forEach { (prov, label) ->
+                                                val isSelected = aiProvider == prov
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .background(if (isSelected) MaterialTheme.colorScheme.secondary else buttonBg)
+                                                        .clickable {
+                                                            aiProvider = prov
+                                                            aiAssistant.aiProvider = prov
+                                                        }
+                                                        .padding(vertical = 4.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Render Settings fields dynamically based on provider selection
+                                when (aiProvider) {
+                                    AiProvider.GEMINI -> {
+                                        OutlinedTextField(
+                                            value = geminiApiKey,
+                                            onValueChange = {
+                                                geminiApiKey = it
+                                                aiAssistant.geminiApiKey = it
+                                            },
+                                            placeholder = { Text("Masukkan Gemini API Key...", fontSize = 11.sp) },
+                                            label = { Text("Gemini API Key", fontSize = 10.sp) },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textStyle = TextStyle(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                        )
+                                    }
+                                    AiProvider.OPENAI -> {
+                                        OutlinedTextField(
+                                            value = openaiApiKey,
+                                            onValueChange = {
+                                                openaiApiKey = it
+                                                aiAssistant.openaiApiKey = it
+                                            },
+                                            placeholder = { Text("sk-...", fontSize = 11.sp) },
+                                            label = { Text("OpenAI API Key", fontSize = 10.sp) },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textStyle = TextStyle(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                        )
+                                        OutlinedTextField(
+                                            value = openaiBaseUrl,
+                                            onValueChange = {
+                                                openaiBaseUrl = it
+                                                aiAssistant.openaiBaseUrl = it
+                                            },
+                                            label = { Text("Base URL Endpoint", fontSize = 10.sp) },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textStyle = TextStyle(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                        )
+                                        OutlinedTextField(
+                                            value = openaiModel,
+                                            onValueChange = {
+                                                openaiModel = it
+                                                aiAssistant.openaiModel = it
+                                            },
+                                            label = { Text("Model Name", fontSize = 10.sp) },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textStyle = TextStyle(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                        )
+                                    }
+                                    AiProvider.CLAUDE -> {
+                                        OutlinedTextField(
+                                            value = claudeApiKey,
+                                            onValueChange = {
+                                                claudeApiKey = it
+                                                aiAssistant.claudeApiKey = it
+                                            },
+                                            placeholder = { Text("sk-ant-...", fontSize = 11.sp) },
+                                            label = { Text("Claude API Key", fontSize = 10.sp) },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textStyle = TextStyle(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                        )
+                                        OutlinedTextField(
+                                            value = claudeModel,
+                                            onValueChange = {
+                                                claudeModel = it
+                                                aiAssistant.claudeModel = it
+                                            },
+                                            label = { Text("Model Name", fontSize = 10.sp) },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textStyle = TextStyle(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                        )
+                                    }
+                                    AiProvider.CUSTOM -> {
+                                        OutlinedTextField(
+                                            value = customBaseUrl,
+                                            onValueChange = {
+                                                customBaseUrl = it
+                                                aiAssistant.customBaseUrl = it
+                                            },
+                                            placeholder = { Text("https://api.deepseek.com/v1/chat/completions", fontSize = 11.sp) },
+                                            label = { Text("Full Base URL Endpoint", fontSize = 10.sp) },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textStyle = TextStyle(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                        )
+                                        OutlinedTextField(
+                                            value = customApiKey,
+                                            onValueChange = {
+                                                customApiKey = it
+                                                aiAssistant.customApiKey = it
+                                            },
+                                            placeholder = { Text("API Key (jika dibutuhkan)", fontSize = 11.sp) },
+                                            label = { Text("API Key / Authorization Token", fontSize = 10.sp) },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textStyle = TextStyle(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                        )
+                                        OutlinedTextField(
+                                            value = customModel,
+                                            onValueChange = {
+                                                customModel = it
+                                                aiAssistant.customModel = it
+                                            },
+                                            placeholder = { Text("deepseek-chat, llama3, dll.", fontSize = 11.sp) },
+                                            label = { Text("Model Name", fontSize = 10.sp) },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textStyle = TextStyle(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
