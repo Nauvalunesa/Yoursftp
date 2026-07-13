@@ -15,10 +15,12 @@ class Converters {
     fun toProtocol(value: String): Protocol = Protocol.valueOf(value)
 }
 
-@Database(entities = [Connection::class], version = 2, exportSchema = false)
+@Database(entities = [Connection::class, TransferHistory::class, KnownHost::class], version = 3, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun connectionDao(): ConnectionDao
+    abstract fun transferHistoryDao(): TransferHistoryDao
+    abstract fun knownHostDao(): KnownHostDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null

@@ -10,8 +10,10 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.Properties
 
+import android.content.Context
+
 /** Klien SFTP berbasis JSch (fork mwiede). */
-class SftpFileClient(private val conn: Connection) : FileClient {
+class SftpFileClient(private val context: Context, private val conn: Connection) : FileClient {
 
     private var session: Session? = null
     private var channel: ChannelSftp? = null
@@ -21,6 +23,9 @@ class SftpFileClient(private val conn: Connection) : FileClient {
 
     override fun connect() {
         val jsch = JSch()
+        val dao = com.yoursftp.app.data.AppDatabase.get(context).knownHostDao()
+        jsch.hostKeyRepository = DbHostKeyRepository(dao)
+
         if (!conn.privateKey.isNullOrBlank()) {
             val prvKeyBytes = conn.privateKey.toByteArray(Charsets.UTF_8)
             val passBytes = if (!conn.passphrase.isNullOrEmpty()) conn.passphrase.toByteArray(Charsets.UTF_8) else null

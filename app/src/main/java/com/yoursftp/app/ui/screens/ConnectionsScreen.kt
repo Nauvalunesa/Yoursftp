@@ -44,7 +44,9 @@ fun ConnectionsScreen(
     onAdd: () -> Unit,
     onEdit: (Connection) -> Unit,
     onConnect: (Connection) -> Unit,
-    onOpenTerminal: (Connection) -> Unit
+    onOpenTerminal: (Connection) -> Unit,
+    onOpenCleaner: () -> Unit = {},
+    onOpenTransferHistory: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val connections by vm.connections.collectAsState()
@@ -92,6 +94,20 @@ fun ConnectionsScreen(
                     titleContentColor = MaterialTheme.colorScheme.onBackground
                 ),
                 actions = {
+                    IconButton(onClick = onOpenCleaner) {
+                        Icon(
+                            imageVector = Icons.Default.CleaningServices,
+                            contentDescription = "Bersihkan Sampah",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(onClick = onOpenTransferHistory) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = "Riwayat Transfer",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     IconButton(onClick = { showAboutDialog = true }) {
                         Icon(
                             imageVector = Icons.Default.Info,

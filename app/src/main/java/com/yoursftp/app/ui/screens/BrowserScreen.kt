@@ -12,7 +12,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -21,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -30,7 +33,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
@@ -65,6 +70,15 @@ private fun looksEditable(name: String): Boolean {
         ".gradle", ".toml", ".gitignore")
     return exts.any { lower.endsWith(it) } || !lower.contains(".")
 }
+
+/** Lokasi cepat untuk penyimpanan lokal (termasuk ruang clone aplikasi). */
+private val LocalShortcuts: List<Pair<String, String>> = listOf(
+    "Penyimpanan Utama (0)" to "/storage/emulated/0",
+    "Ruang Clone (999)" to "/storage/emulated/999",
+    "Download" to "/storage/emulated/0/Download",
+    "WhatsApp Media" to "/storage/emulated/0/Android/media/com.whatsapp/WhatsApp",
+    "WA Business Media" to "/storage/emulated/0/Android/media/com.whatsapp.w4b/WhatsApp Business"
+)
 
 sealed class FileIcon {
     data class Vector(val imageVector: ImageVector) : FileIcon()
@@ -270,6 +284,27 @@ fun BrowserScreen(
         vm.connect(2, connectionId)
     }
 
+    val hostKeyChangedEvent = state.hostKeyChangedEvent
+    if (hostKeyChangedEvent != null) {
+        AlertDialog(
+            onDismissRequest = { vm.clearHostKeyChangedEvent() },
+            title = { Text("Peringatan Keamanan: Host Key Berubah!", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
+            text = { Text("Kunci host untuk server ${hostKeyChangedEvent.host} telah berubah.\nIni bisa terjadi jika server di-reinstall atau ada serangan Man-in-the-Middle.\n\nKunci Baru: ${hostKeyChangedEvent.newKey}\n\nApakah Anda mempercayai kunci baru ini?") },
+            confirmButton = {
+                Button(onClick = {
+                    vm.acceptNewHostKey(hostKeyChangedEvent.host, hostKeyChangedEvent.newKey, connectionId)
+                }) {
+                    Text("Percaya Key Baru")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.clearHostKeyChangedEvent() }) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
+
     LaunchedEffect(state.globalError, state.tab1.error, state.tab2.error) {
         state.globalError?.let {
             snackbar.showSnackbar(it)
@@ -361,6 +396,8 @@ fun BrowserScreen(
                             tabState = state.tab1,
                             connections = connections,
                             hasStoragePermission = hasStoragePermission,
+                            vm = vm,
+                            moveClipboardActive = state.moveClipboard != null,
                             onOpen = { file ->
                                 vm.open(
                                     tabIndex = 1,
@@ -426,6 +463,8 @@ fun BrowserScreen(
                             tabState = state.tab2,
                             connections = connections,
                             hasStoragePermission = hasStoragePermission,
+                            vm = vm,
+                            moveClipboardActive = state.moveClipboard != null,
                             onOpen = { file ->
                                 vm.open(
                                     tabIndex = 2,
@@ -509,6 +548,8 @@ fun BrowserScreen(
                             tabState = state.tab1,
                             connections = connections,
                             hasStoragePermission = hasStoragePermission,
+                            vm = vm,
+                            moveClipboardActive = state.moveClipboard != null,
                             onOpen = { file ->
                                 vm.open(
                                     tabIndex = 1,
@@ -558,6 +599,8 @@ fun BrowserScreen(
                             tabState = state.tab2,
                             connections = connections,
                             hasStoragePermission = hasStoragePermission,
+                            vm = vm,
+                            moveClipboardActive = state.moveClipboard != null,
                             onOpen = { file ->
                                 vm.open(
                                     tabIndex = 2,
@@ -823,6 +866,8 @@ fun FilePane(
     tabState: TabState,
     connections: List<Connection>,
     hasStoragePermission: Boolean,
+    vm: BrowserViewModel,
+    moveClipboardActive: Boolean,
     onOpen: (RemoteFile) -> Unit,
     onRename: (RemoteFile) -> Unit,
     onDelete: (RemoteFile) -> Unit,
@@ -838,6 +883,7 @@ fun FilePane(
     onFocusPane: () -> Unit
 ) {
     var connectionMenuOpen by remember { mutableStateOf(false) }
+    var shortcutMenuOpen by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -913,6 +959,37 @@ fun FilePane(
                     )
                 }
             }
+
+            // Aksi cepat: shortcut path, toggle file tersembunyi.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (tabState.connectionId == -1L) {
+                    Box {
+                        IconButton(onClick = { shortcutMenuOpen = true }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Bookmarks, contentDescription = "Lokasi cepat", tint = headerContentColor, modifier = Modifier.size(16.dp))
+                        }
+                        DropdownMenu(expanded = shortcutMenuOpen, onDismissRequest = { shortcutMenuOpen = false }) {
+                            LocalShortcuts.forEach { (label, path) ->
+                                DropdownMenuItem(
+                                    text = { Text(label, fontSize = 12.sp) },
+                                    leadingIcon = { Icon(Icons.Default.FolderSpecial, contentDescription = null, modifier = Modifier.size(15.dp)) },
+                                    onClick = {
+                                        shortcutMenuOpen = false
+                                        vm.navigateTo(tabIndex, path)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                IconButton(onClick = { vm.toggleShowHidden(tabIndex) }, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        imageVector = if (tabState.showHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        contentDescription = "File tersembunyi",
+                        tint = if (tabState.showHidden) MaterialTheme.colorScheme.primary else headerContentColor,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
         }
 
         // Filter / Search Bar
@@ -922,28 +999,57 @@ fun FilePane(
                 .padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedTextField(
+            var filterFocused by remember { mutableStateOf(false) }
+            BasicTextField(
                 value = tabState.filterQuery,
                 onValueChange = onFilterQueryChange,
-                placeholder = { Text("Filter...", fontSize = 11.sp) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(14.dp)) },
-                trailingIcon = {
-                    if (tabState.filterQuery.isNotEmpty()) {
-                        IconButton(onClick = { onFilterQueryChange("") }, modifier = Modifier.size(16.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(12.dp))
-                        }
-                    }
-                },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(36.dp),
-                textStyle = TextStyle(fontSize = 12.sp),
-                shape = RoundedCornerShape(18.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                    .height(36.dp)
+                    .onFocusChanged { filterFocused = it.isFocused },
+                textStyle = TextStyle(
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface
                 ),
-                singleLine = true
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                singleLine = true,
+                decorationBox = { innerTextField ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .border(
+                                width = 1.dp,
+                                color = if (filterFocused) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                shape = RoundedCornerShape(18.dp)
+                            )
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Box(modifier = Modifier.weight(1f)) {
+                            if (tabState.filterQuery.isEmpty()) {
+                                Text(
+                                    "Filter...",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                )
+                            }
+                            innerTextField()
+                        }
+                        if (tabState.filterQuery.isNotEmpty()) {
+                            IconButton(onClick = { onFilterQueryChange("") }, modifier = Modifier.size(16.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(12.dp))
+                            }
+                        }
+                    }
+                }
             )
         }
 
@@ -1089,6 +1195,65 @@ fun FilePane(
             }
         }
 
+        // Bilah aksi mode seleksi (multi-select).
+        if (tabState.selectionMode) {
+            Surface(color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { vm.clearSelection(tabIndex) }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Batal", modifier = Modifier.size(16.dp))
+                    }
+                    Text(
+                        "${tabState.selectedPaths.size} dipilih",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { vm.selectAll(tabIndex) }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.SelectAll, contentDescription = "Pilih semua", modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = { vm.cutSelected(tabIndex) }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.ContentCut, contentDescription = "Potong", modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = { vm.transferSelected(tabIndex) }, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            imageVector = if (tabIndex == 1) Icons.AutoMirrored.Filled.ArrowForward else Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Kirim ke sebelah", modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    IconButton(onClick = { vm.zipSelected(tabIndex) }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Archive, contentDescription = "Zip", modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = { vm.deleteSelected(tabIndex) }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Delete, contentDescription = "Hapus", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+
+        // Bilah tempel (paste) saat ada item yang dipotong.
+        if (moveClipboardActive && !tabState.selectionMode) {
+            Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Item siap dipindah", fontSize = 11.sp, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { vm.clearMoveClipboard() }) { Text("Batal", fontSize = 11.sp) }
+                    TextButton(onClick = { vm.pasteMove(tabIndex) }) { Text("Tempel di sini", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                }
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1136,11 +1301,17 @@ fun FilePane(
                         FileRow(
                             file = file,
                             tabIndex = tabIndex,
+                            selectionMode = tabState.selectionMode,
+                            isSelected = file.path in tabState.selectedPaths,
+                            onClickInSelection = { vm.toggleSelected(tabIndex, file) },
+                            onLongPress = { vm.enterSelection(tabIndex, file) },
+                            onCut = { vm.cutSingle(tabIndex, file) },
                             onOpen = { onOpen(file) },
                             onRename = { onRename(file) },
                             onDelete = { onDelete(file) },
                             onEdit = { onEdit(file) },
-                            onTransfer = { onTransfer(file) }
+                            onTransfer = { onTransfer(file) },
+                            onUnzip = { vm.unzipSingle(tabIndex, file) }
                         )
                     }
                 }
@@ -1170,49 +1341,76 @@ fun FilePane(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FileRow(
     file: RemoteFile,
     tabIndex: Int,
+    selectionMode: Boolean,
+    isSelected: Boolean,
+    onClickInSelection: () -> Unit,
+    onLongPress: () -> Unit,
+    onCut: () -> Unit,
     onOpen: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
     onEdit: () -> Unit,
-    onTransfer: () -> Unit
+    onTransfer: () -> Unit,
+    onUnzip: () -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
     var showDetailsDialog by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val (icon, tint) = getFileColorAndIcon(file.name, file.isDirectory)
 
+    val rowBg = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent
+
     ListItem(
+        colors = ListItemDefaults.colors(containerColor = rowBg),
         modifier = Modifier
-            .clickable { onOpen() }
+            .combinedClickable(
+                onClick = { if (selectionMode) onClickInSelection() else onOpen() },
+                onLongClick = onLongPress
+            )
             .padding(horizontal = 2.dp, vertical = 1.dp),
         leadingContent = {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(tint.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) {
-                when (icon) {
-                    is FileIcon.Vector -> {
-                        Icon(
-                            icon.imageVector,
-                            contentDescription = null,
-                            tint = tint,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                    is FileIcon.Resource -> {
-                        Icon(
-                            painter = painterResource(id = icon.resId),
-                            contentDescription = null,
-                            tint = Color.Unspecified,
-                            modifier = Modifier.size(16.dp)
-                        )
+            if (selectionMode) {
+                Box(
+                    modifier = Modifier.size(28.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                        contentDescription = null,
+                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(tint.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    when (icon) {
+                        is FileIcon.Vector -> {
+                            Icon(
+                                icon.imageVector,
+                                contentDescription = null,
+                                tint = tint,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        is FileIcon.Resource -> {
+                            Icon(
+                                painter = painterResource(id = icon.resId),
+                                contentDescription = null,
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -1236,7 +1434,8 @@ private fun FileRow(
             }
             Text(details, fontSize = 9.sp)
         },
-        trailingContent = {
+        trailingContent = if (selectionMode) null else {
+            {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     IconButton(
@@ -1265,6 +1464,11 @@ private fun FileRow(
                             onClick = { menu = false; onTransfer() }
                         )
                         DropdownMenuItem(
+                            text = { Text("Potong", fontSize = 12.sp) },
+                            leadingIcon = { Icon(Icons.Default.ContentCut, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                            onClick = { menu = false; onCut() }
+                        )
+                        DropdownMenuItem(
                             text = { Text("Salin Path", fontSize = 12.sp) },
                             leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp)) },
                             onClick = { 
@@ -1278,10 +1482,17 @@ private fun FileRow(
                             onClick = { menu = false; showDetailsDialog = true }
                         )
                         DropdownMenuItem(
-                            text = { Text("Ganti Nama", fontSize = 12.sp) },
+                            text = { Text("Ubah Nama", fontSize = 12.sp) },
                             leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null, modifier = Modifier.size(14.dp)) },
                             onClick = { menu = false; onRename() }
                         )
+                        if (file.name.lowercase().endsWith(".zip")) {
+                            DropdownMenuItem(
+                                text = { Text("Ekstrak", fontSize = 12.sp) },
+                                leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                                onClick = { menu = false; onUnzip() }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Hapus", fontSize = 12.sp) },
                             leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp)) },
@@ -1289,6 +1500,7 @@ private fun FileRow(
                         )
                     }
                 }
+            }
             }
         }
     )

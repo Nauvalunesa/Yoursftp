@@ -66,7 +66,7 @@ class EditConnectionViewModel(application: Application) : AndroidViewModel(appli
                 privateKey = privateKey?.takeIf { it.isNotBlank() },
                 passphrase = passphrase?.takeIf { it.isNotBlank() }
             )
-            val client = com.yoursftp.app.transfer.FileClientFactory.create(testConn)
+            val client = com.yoursftp.app.transfer.FileClientFactory.create(getApplication<Application>(), testConn)
             client.connect()
             client.disconnect()
             withContext(Dispatchers.Main) {

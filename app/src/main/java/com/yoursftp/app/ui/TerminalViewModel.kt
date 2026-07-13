@@ -63,8 +63,15 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
 
                 withContext(Dispatchers.IO) {
                     val jsch = JSch()
+                    if (!conn.privateKey.isNullOrBlank()) {
+                        val prvKeyBytes = conn.privateKey.toByteArray(Charsets.UTF_8)
+                        val passBytes = if (!conn.passphrase.isNullOrEmpty()) conn.passphrase.toByteArray(Charsets.UTF_8) else null
+                        jsch.addIdentity(conn.name, prvKeyBytes, null, passBytes)
+                    }
                     val s = jsch.getSession(conn.username, conn.host, conn.port)
-                    s.setPassword(conn.password)
+                    if (conn.privateKey.isNullOrBlank()) {
+                        s.setPassword(conn.password)
+                    }
                     s.setConfig(Properties().apply {
                         put("StrictHostKeyChecking", "no")
                         put("CheckHostIP", "no")
@@ -73,7 +80,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                             "ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,rsa-sha2-512,rsa-sha2-256,ssh-rsa")
                         put("PubkeyAcceptedAlgorithms",
                             "ssh-ed25519,ecdsa-sha2-nistp256,rsa-sha2-512,rsa-sha2-256,ssh-rsa")
-                        put("PreferredAuthentications", "password,keyboard-interactive")
+                        put("PreferredAuthentications", "publickey,password,keyboard-interactive")
                     })
                     s.timeout = 15_000
                     s.setServerAliveInterval(20_000)

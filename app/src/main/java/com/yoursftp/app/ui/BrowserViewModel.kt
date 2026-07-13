@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.yoursftp.app.data.AppDatabase
+import com.yoursftp.app.data.TransferHistory
 import java.io.File
 
 enum class SortOrder {
@@ -45,6 +47,9 @@ data class TabState(
     val sortOrder: SortOrder = SortOrder.NAME_ASC,
     val filterType: FilterType = FilterType.ALL,
     val foldersFirst: Boolean = true,
+    val showHidden: Boolean = false,
+    val selectionMode: Boolean = false,
+    val selectedPaths: Set<String> = emptySet(),
     val loading: Boolean = false,
     val connected: Boolean = false,
     val error: String? = null,
@@ -52,11 +57,14 @@ data class TabState(
 ) {
     val filteredFiles: List<RemoteFile>
         get() {
+            // 0. Sembunyikan file tersembunyi (diawali titik) kecuali diminta.
+            var result = if (showHidden) files else files.filter { !it.name.startsWith(".") }
+
             // 1. Filter by Name/Extension
-            var result = if (filterQuery.isBlank()) {
-                files
+            result = if (filterQuery.isBlank()) {
+                result
             } else {
-                files.filter { it.name.contains(filterQuery, ignoreCase = true) }
+                result.filter { it.name.contains(filterQuery, ignoreCase = true) }
             }
 
             // 2. Filter by Type
@@ -103,12 +111,22 @@ data class TransferProgress(
     val etaSeconds: Int = -1
 )
 
+/** Item yang sedang "dipotong" untuk dipindah (move) di dalam satu tab/koneksi. */
+data class MoveClipboard(
+    val sourceTabIndex: Int,
+    val files: List<RemoteFile>
+)
+
+data class HostKeyChangedEvent(val host: String, val newKey: String)
+
 data class BrowserState(
     val tab1: TabState = TabState(),
     val tab2: TabState = TabState(),
     val activeTab: Int = 1,
     val globalError: String? = null,
-    val transferProgress: TransferProgress = TransferProgress()
+    val transferProgress: TransferProgress = TransferProgress(),
+    val moveClipboard: MoveClipboard? = null,
+    val hostKeyChangedEvent: HostKeyChangedEvent? = null
 )
 
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
@@ -136,6 +154,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             }
         }
     }
+
+
 
     fun connect(tabIndex: Int, connectionId: Long) {
         val currentTabState = if (tabIndex == 1) _state.value.tab1 else _state.value.tab2
@@ -165,7 +185,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     } else {
                         val conn = repo.getById(connectionId)
                             ?: throw IllegalStateException("Koneksi tidak ditemukan")
-                        FileClientFactory.create(conn).apply { connect() }
+                        FileClientFactory.create(getApplication<Application>(), conn).apply { connect() }
                     }
                 }
 
@@ -191,12 +211,37 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 }
                 
                 refresh(tabIndex, initialPath)
-            } catch (e: Exception) {
+            } catch (e: com.yoursftp.app.transfer.HostKeyChangedException) {
+                _state.value = _state.value.copy(
+                    hostKeyChangedEvent = HostKeyChangedEvent(e.host, e.newKey),
+                    globalError = e.message
+                )
                 updateTab(tabIndex) {
                     it.copy(
                         loading = false,
                         error = e.message ?: "Gagal terhubung"
                     )
+                }
+            } catch (e: Exception) {
+                val cause = generateSequence((e as? Throwable)) { it.cause }.find { it is com.yoursftp.app.transfer.HostKeyChangedException } as? com.yoursftp.app.transfer.HostKeyChangedException
+                if (cause != null) {
+                    _state.value = _state.value.copy(
+                        hostKeyChangedEvent = HostKeyChangedEvent(cause.host, cause.newKey),
+                        globalError = cause.message
+                    )
+                    updateTab(tabIndex) {
+                        it.copy(
+                            loading = false,
+                            error = cause.message
+                        )
+                    }
+                } else {
+                    updateTab(tabIndex) {
+                        it.copy(
+                            loading = false,
+                            error = e.message ?: "Gagal terhubung"
+                        )
+                    }
                 }
             }
         }
@@ -339,6 +384,179 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         updateTab(tabIndex) { it.copy(foldersFirst = foldersFirst) }
     }
 
+    fun toggleShowHidden(tabIndex: Int) {
+        updateTab(tabIndex) { it.copy(showHidden = !it.showHidden) }
+    }
+
+    /** Loncat langsung ke sebuah path (mis. ruang clone /storage/emulated/999). */
+    fun navigateTo(tabIndex: Int, path: String) {
+        refresh(tabIndex, path)
+    }
+
+    // ---- Mode seleksi (multi-select) ----
+
+    fun enterSelection(tabIndex: Int, file: RemoteFile) {
+        updateTab(tabIndex) {
+            it.copy(selectionMode = true, selectedPaths = setOf(file.path))
+        }
+        setActiveTab(tabIndex)
+    }
+
+    fun toggleSelected(tabIndex: Int, file: RemoteFile) {
+        updateTab(tabIndex) {
+            val newSet = if (file.path in it.selectedPaths) {
+                it.selectedPaths - file.path
+            } else {
+                it.selectedPaths + file.path
+            }
+            it.copy(selectedPaths = newSet, selectionMode = newSet.isNotEmpty())
+        }
+    }
+
+    fun selectAll(tabIndex: Int) {
+        val tabState = if (tabIndex == 1) _state.value.tab1 else _state.value.tab2
+        val all = tabState.filteredFiles.map { it.path }.toSet()
+        updateTab(tabIndex) { it.copy(selectedPaths = all, selectionMode = true) }
+    }
+
+    fun clearSelection(tabIndex: Int) {
+        updateTab(tabIndex) { it.copy(selectionMode = false, selectedPaths = emptySet()) }
+    }
+
+    private fun selectedFiles(tabIndex: Int): List<RemoteFile> {
+        val tabState = if (tabIndex == 1) _state.value.tab1 else _state.value.tab2
+        return tabState.files.filter { it.path in tabState.selectedPaths }
+    }
+
+    fun deleteSelected(tabIndex: Int) {
+        val targets = selectedFiles(tabIndex)
+        if (targets.isEmpty()) return
+        val tabState = if (tabIndex == 1) _state.value.tab1 else _state.value.tab2
+        val client = tabState.client ?: return
+
+        updateTab(tabIndex) { it.copy(loading = true, error = null) }
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    for (f in targets) {
+                        if (f.isDirectory) client.deleteDirectory(f.path) else client.deleteFile(f.path)
+                    }
+                }
+                clearSelection(tabIndex)
+                refresh(tabIndex)
+            } catch (e: Exception) {
+                updateTab(tabIndex) { it.copy(loading = false, error = e.message ?: "Gagal menghapus") }
+            }
+        }
+    }
+
+    fun transferSelected(sourceTabIndex: Int) {
+        val targets = selectedFiles(sourceTabIndex)
+        if (targets.isEmpty()) return
+
+        val destTabIndex = if (sourceTabIndex == 1) 2 else 1
+        val sourceState = if (sourceTabIndex == 1) _state.value.tab1 else _state.value.tab2
+        val destState = if (destTabIndex == 1) _state.value.tab1 else _state.value.tab2
+        val sourceClient = sourceState.client ?: return
+        val destClient = destState.client ?: return
+
+        _state.value = _state.value.copy(
+            globalError = null,
+            transferProgress = TransferProgress(isActive = true, currentFileName = targets.first().name)
+        )
+        clearSelection(sourceTabIndex)
+
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val dao = AppDatabase.get(getApplication<Application>()).transferHistoryDao()
+                    for (file in targets) {
+                        val destName = getUniqueDestName(destState.files, file.name)
+                        val destPath = joinPath(destState.currentPath, destName)
+                        _state.value = _state.value.copy(
+                            transferProgress = _state.value.transferProgress.copy(currentFileName = file.name)
+                        )
+                        
+                        var status = "SUCCESS"
+                        try {
+                            if (file.isDirectory) {
+                                copyRecursive(sourceClient, destClient, file.path, destPath)
+                            } else {
+                                val startTime = System.currentTimeMillis()
+                                val data = sourceClient.download(file.path) { b, t -> updateProgress(b, t, startTime, false) }
+                                val upStart = System.currentTimeMillis()
+                                destClient.upload(destPath, data) { b, t -> updateProgress(b, t, upStart, true) }
+                            }
+                        } catch (e: Exception) {
+                            status = "FAILED"
+                            throw e
+                        } finally {
+                            dao.insert(
+                                TransferHistory(
+                                    fileName = file.name,
+                                    sourcePath = file.path,
+                                    destPath = destPath,
+                                    size = file.size,
+                                    timestamp = System.currentTimeMillis(),
+                                    status = status
+                                )
+                            )
+                        }
+                    }
+                }
+                refresh(sourceTabIndex)
+                refresh(destTabIndex)
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(globalError = e.message ?: "Gagal mentransfer")
+            } finally {
+                _state.value = _state.value.copy(transferProgress = TransferProgress(isActive = false))
+            }
+        }
+    }
+
+    // ---- Potong / Tempel (move) di dalam satu tab ----
+
+    fun cutSelected(tabIndex: Int) {
+        val targets = selectedFiles(tabIndex)
+        if (targets.isEmpty()) return
+        _state.value = _state.value.copy(moveClipboard = MoveClipboard(tabIndex, targets))
+        clearSelection(tabIndex)
+    }
+
+    fun cutSingle(tabIndex: Int, file: RemoteFile) {
+        _state.value = _state.value.copy(moveClipboard = MoveClipboard(tabIndex, listOf(file)))
+    }
+
+    fun clearMoveClipboard() {
+        _state.value = _state.value.copy(moveClipboard = null)
+    }
+
+    /** Tempel item yang dipotong ke folder aktif pada [destTabIndex]. */
+    fun pasteMove(destTabIndex: Int) {
+        val clip = _state.value.moveClipboard ?: return
+        val destState = if (destTabIndex == 1) _state.value.tab1 else _state.value.tab2
+        val client = destState.client ?: return
+
+        updateTab(destTabIndex) { it.copy(loading = true, error = null) }
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    for (f in clip.files) {
+                        val destName = getUniqueDestName(destState.files, f.name)
+                        val destPath = joinPath(destState.currentPath, destName)
+                        if (destPath != f.path) client.rename(f.path, destPath)
+                    }
+                }
+                _state.value = _state.value.copy(moveClipboard = null)
+                refresh(destTabIndex)
+                // Segarkan tab sumber bila berbeda agar item hilang dari tempat asal.
+                if (clip.sourceTabIndex != destTabIndex) refresh(clip.sourceTabIndex)
+            } catch (e: Exception) {
+                updateTab(destTabIndex) { it.copy(loading = false, error = e.message ?: "Gagal memindahkan") }
+            }
+        }
+    }
+
     fun setActiveTab(tabIndex: Int) {
         _state.value = _state.value.copy(activeTab = tabIndex)
     }
@@ -471,7 +689,108 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         return t
     }
 
-    private fun mutate(tabIndex: Int, block: (FileClient, String) -> Unit) {
+    fun zipSelected(tabIndex: Int) {
+        val targets = selectedFiles(tabIndex)
+        if (targets.isEmpty()) return
+        val tabState = if (tabIndex == 1) _state.value.tab1 else _state.value.tab2
+        val client = tabState.client ?: return
+        
+        val archiveName = if (targets.size == 1) {
+            "${targets.first().name}.zip"
+        } else {
+            "archive_${System.currentTimeMillis()}.zip"
+        }
+        
+        _state.value = _state.value.copy(
+            globalError = null,
+            transferProgress = TransferProgress(isActive = true, currentFileName = "Mengompres ke $archiveName...")
+        )
+        clearSelection(tabIndex)
+        
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val ctx = getApplication<Application>()
+                    val tempDir = File(ctx.cacheDir, "zip_temp_${System.currentTimeMillis()}").apply { mkdirs() }
+                    val outZip = File(ctx.cacheDir, "out_${System.currentTimeMillis()}.zip")
+                    
+                    val localClient = com.yoursftp.app.transfer.LocalFileClient()
+                    
+                    for (file in targets) {
+                        val destPath = joinPath(tempDir.absolutePath, file.name)
+                        if (file.isDirectory) {
+                            copyRecursive(client, localClient, file.path, destPath)
+                        } else {
+                            val data = client.download(file.path) { _, _ -> }
+                            localClient.upload(destPath, data) { _, _ -> }
+                        }
+                    }
+                    
+                    com.yoursftp.app.transfer.ArchiveUtils.zip(targets.map { File(tempDir, it.name) }, tempDir, outZip)
+                    
+                    val destZipPath = joinPath(tabState.currentPath, archiveName)
+                    val data = localClient.download(outZip.absolutePath) { _, _ -> }
+                    client.upload(destZipPath, data) { _, _ -> }
+                    
+                    tempDir.deleteRecursively()
+                    outZip.delete()
+                }
+                refresh(tabIndex)
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(globalError = e.message ?: "Gagal membuat zip")
+            } finally {
+                _state.value = _state.value.copy(transferProgress = TransferProgress(isActive = false))
+            }
+        }
+    }
+
+    fun unzipSingle(tabIndex: Int, file: RemoteFile) {
+        val tabState = if (tabIndex == 1) _state.value.tab1 else _state.value.tab2
+        val client = tabState.client ?: return
+        
+        _state.value = _state.value.copy(
+            globalError = null,
+            transferProgress = TransferProgress(isActive = true, currentFileName = "Mengekstrak ${file.name}...")
+        )
+        
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val ctx = getApplication<Application>()
+                    val tempZip = File(ctx.cacheDir, "temp_${System.currentTimeMillis()}.zip")
+                    val outDir = File(ctx.cacheDir, "unzip_${System.currentTimeMillis()}").apply { mkdirs() }
+                    
+                    val localClient = com.yoursftp.app.transfer.LocalFileClient()
+                    
+                    val zipData = client.download(file.path) { _, _ -> }
+                    localClient.upload(tempZip.absolutePath, zipData) { _, _ -> }
+                    
+                    com.yoursftp.app.transfer.ArchiveUtils.unzip(tempZip, outDir)
+                    
+                    val destBase = tabState.currentPath
+                    outDir.listFiles()?.forEach { child ->
+                        val destPath = joinPath(destBase, child.name)
+                        if (child.isDirectory) {
+                            copyRecursive(localClient, client, child.absolutePath, destPath)
+                        } else {
+                            val data = localClient.download(child.absolutePath) { _, _ -> }
+                            client.upload(destPath, data) { _, _ -> }
+                        }
+                    }
+                    
+                    tempZip.delete()
+                    outDir.deleteRecursively()
+                }
+                refresh(tabIndex)
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(globalError = e.message ?: "Gagal mengekstrak zip")
+            } finally {
+                _state.value = _state.value.copy(transferProgress = TransferProgress(isActive = false))
+            }
+        }
+    }
+
+    private fun mutate(tabIndex: Int, block: suspend (FileClient, String) -> Unit) {
         val tabState = if (tabIndex == 1) _state.value.tab1 else _state.value.tab2
         val client = tabState.client ?: return
         
@@ -513,6 +832,23 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             runCatching { _state.value.tab2.client?.disconnect() }
         }
         _state.value = BrowserState()
+    }
+    
+    fun clearHostKeyChangedEvent() {
+        _state.value = _state.value.copy(hostKeyChangedEvent = null)
+    }
+
+    fun acceptNewHostKey(host: String, newKey: String, connectionId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val dao = AppDatabase.get(getApplication<Application>()).knownHostDao()
+            dao.deleteHost(host, 22)
+            dao.insert(com.yoursftp.app.data.KnownHost(host = host, port = 22, hostKey = newKey, trustedAt = System.currentTimeMillis()))
+            
+            withContext(Dispatchers.Main) {
+                clearHostKeyChangedEvent()
+                connect(1, connectionId)
+            }
+        }
     }
 
     fun hasTransferConflict(sourceTabIndex: Int, file: RemoteFile): Boolean {
