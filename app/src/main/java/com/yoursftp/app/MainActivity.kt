@@ -30,6 +30,8 @@ import com.yoursftp.app.ui.screens.EditConnectionScreen
 import com.yoursftp.app.ui.screens.EditorScreen
 import com.yoursftp.app.ui.screens.TransferHistoryScreen
 import com.yoursftp.app.ui.TransferHistoryViewModel
+import com.yoursftp.app.clean.CleanerScreen
+import com.yoursftp.app.clean.CleanerViewModel
 import com.yoursftp.app.ui.theme.YoursFtpTheme
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedContentTransitionScope
@@ -79,8 +81,14 @@ private fun AppNav(factory: AppViewModelFactory) {
                 onEdit = { nav.navigate(Routes.editConnection(it.id)) },
                 onConnect = { nav.navigate(Routes.browser(it.id)) },
                 onOpenTerminal = { nav.navigate(Routes.terminal(it.id)) },
+                onOpenCleaner = { nav.navigate(Routes.CLEANER) },
                 onOpenTransferHistory = { nav.navigate(Routes.TRANSFER_HISTORY) }
             )
+        }
+
+        composable(Routes.CLEANER) {
+            val vm: CleanerViewModel = viewModel(factory)
+            CleanerScreen(vm = vm, onBack = { nav.popBackStack() })
         }
 
         composable(Routes.TRANSFER_HISTORY) {

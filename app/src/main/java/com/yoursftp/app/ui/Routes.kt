@@ -9,6 +9,7 @@ object Routes {
     const val TERMINAL = "terminal"                     // /{connectionId}
     const val DB_VIEWER = "db_viewer"                   // ?path={path}&title={title}
     const val TRANSFER_HISTORY = "transfer_history"
+    const val CLEANER = "cleaner"
 
     fun editConnection(id: Long?) =
         if (id == null) "$EDIT_CONNECTION?id=-1" else "$EDIT_CONNECTION?id=$id"

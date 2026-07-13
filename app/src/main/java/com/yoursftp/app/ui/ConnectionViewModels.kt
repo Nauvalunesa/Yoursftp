@@ -131,6 +131,10 @@ class AppViewModelFactory(private val application: Application) : ViewModelProvi
             TerminalViewModel(application) as T
         modelClass.isAssignableFrom(com.yoursftp.app.ota.OtaViewModel::class.java) ->
             com.yoursftp.app.ota.OtaViewModel(application) as T
+        modelClass.isAssignableFrom(TransferHistoryViewModel::class.java) ->
+            TransferHistoryViewModel(application) as T
+        modelClass.isAssignableFrom(com.yoursftp.app.clean.CleanerViewModel::class.java) ->
+            com.yoursftp.app.clean.CleanerViewModel(application) as T
         else -> throw IllegalArgumentException("Unknown ViewModel: ${modelClass.name}")
     }
 }

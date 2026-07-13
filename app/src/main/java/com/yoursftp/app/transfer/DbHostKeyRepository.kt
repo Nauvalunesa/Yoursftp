@@ -45,13 +45,13 @@ class DbHostKeyRepository(private val dao: KnownHostDao) : HostKeyRepository {
         }
     }
 
-    override fun remove(host: String, type: String) {}
+    override fun remove(host: String?, type: String?) {}
 
-    override fun remove(host: String, type: String, key: ByteArray) {}
+    override fun remove(host: String?, type: String?, key: ByteArray?) {}
 
     override fun getKnownHostsRepositoryID(): String = "YoursFtpDbHostKeyRepository"
 
     override fun getHostKey(): Array<HostKey> = emptyArray()
 
-    override fun getHostKey(host: String, type: String): Array<HostKey> = emptyArray()
+    override fun getHostKey(host: String?, type: String?): Array<HostKey> = emptyArray()
 }
