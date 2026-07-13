@@ -36,10 +36,15 @@ class CleanerViewModel(application: Application) : AndroidViewModel(application)
         _state.value = _state.value.copy(scanning = true, result = null, selectedPaths = emptySet(), message = null)
         viewModelScope.launch {
             try {
+                var lastUpdate = 0L
                 val raw = withContext(Dispatchers.IO) {
                     scanner.scan(onProgress = { path ->
-                        _state.value = _state.value.copy(progressPath = path)
-                    })
+                        val now = System.currentTimeMillis()
+                        if (now - lastUpdate > 100) {
+                            lastUpdate = now
+                            _state.value = _state.value.copy(progressPath = path)
+                        }
+                    }, maxDepth = 4)
                 }
                 // Ganti nama paket dgn nama aplikasi asli utk kategori APP_CACHE.
                 val result = withContext(Dispatchers.IO) { resolveAppNames(raw) }

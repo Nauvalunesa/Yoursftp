@@ -190,7 +190,7 @@ fun TerminalScreen(
                 actions = {
 
                     // Zoom Out & In Font
-                    IconButton(onClick = { fontSizeSp = (fontSizeSp - 1f).coerceAtLeast(8f) }) {
+                    IconButton(onClick = { fontSizeSp = (fontSizeSp - 1f).coerceAtLeast(1f) }) {
                         Icon(Icons.Default.ZoomOut, contentDescription = "Perkecil Font", modifier = Modifier.size(18.dp))
                     }
                     IconButton(onClick = { fontSizeSp = (fontSizeSp + 1f).coerceAtMost(24f) }) {
